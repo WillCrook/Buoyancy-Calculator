@@ -1,209 +1,260 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from abc import ABC, abstractmethod
-from math import pi
-from typing import List, Iterable, Optional, Tuple, Dict, Any
+from math import pi, cos, sin, radians
+from typing import List, Optional, Tuple, Dict, Any
 import argparse
 import json
-
 
 # Physical constants (SI units) - defaults used when not provided in config
 DEFAULT_FLUID_DENSITY = 1025.0  # kg/m^3 (seawater default)
 DEFAULT_GRAVITY = 9.81          # m/s^2 (standard gravity)
 
+def _rotation_matrix_xyz(rx_deg: float, ry_deg: float, rz_deg: float) -> List[List[float]]:
+    rx = radians(rx_deg)
+    ry = radians(ry_deg)
+    rz = radians(rz_deg)
+    cx, sx = cos(rx), sin(rx)
+    cy, sy = cos(ry), sin(ry)
+    cz, sz = cos(rz), sin(rz)
+    # R = Rz * Ry * Rx
+    Rz = [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]]
+    Ry = [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]]
+    Rx = [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]]
 
-def cap(value, min_value, max_value):
-    if value < min_value:
-        return min_value
-    if value > max_value:
-        return max_value
-    return value
+    def matmul(A, B):
+        return [[sum(A[i][k] * B[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+    return matmul(matmul(Rz, Ry), Rx)
 
 
-@dataclass(kw_only=True)
-class Shape(ABC):
-    """Base class for buoyancy shapes.
+def _apply_rotation(R: List[List[float]], v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    x, y, z = v
+    return (
+        R[0][0] * x + R[0][1] * y + R[0][2] * z,
+        R[1][0] * x + R[1][1] * y + R[1][2] * z,
+        R[2][0] * x + R[2][1] * y + R[2][2] * z,
+    )
 
-    Coordinate system:
-    - z-axis is vertical; waterline is a horizontal plane at z = waterline_z.
-    - Each shape has its geometric dimensions and a vertical position given by base_z,
-      the z-coordinate of its bottom-most point.
 
-    Extensibility: Subclasses should implement total_volume() and submerged_volume().
-    Hollow or composite shapes can override submerged_volume() with custom logic.
-    """
+class OrientedShape3D:
+    def __init__(self, *, center: Tuple[float, float, float], rotation_deg: Tuple[float, float, float],
+                 density: Optional[float], mass_kg: Optional[float], hollow: bool, thickness_m: float,
+                 contributes_to_displacement: bool, name: str = "") -> None:
+        self.center = center
+        self.rotation_deg = rotation_deg
+        self.R = _rotation_matrix_xyz(*rotation_deg)
+        self.density = density
+        self.mass_kg = mass_kg
+        self.hollow = hollow
+        self.thickness_m = max(0.0, thickness_m)
+        self.contributes_to_displacement = contributes_to_displacement
+        self.name = name
 
-    # Position
-    base_z: float  # z position of the shape's bottom
-    pos_x: float = 0.0
-    pos_y: float = 0.0
-    name: str = ""
-    # Mass properties (optional)
-    material_density_kg_per_m3: Optional[float] = None  # if provided, mass can be derived from volume
-    mass_kg: Optional[float] = None  # explicit mass overrides derived density
-    contributes_to_displacement: bool = True
+    # Interface required by voxel engine
+    def is_point_inside_outer(self, p_world: Tuple[float, float, float]) -> bool:
+        raise NotImplementedError
 
-    @abstractmethod
-    def total_volume(self) -> float:
-        """Return the total geometric volume of the shape (m^3)."""
+    def is_point_inside_inner(self, p_world: Tuple[float, float, float]) -> bool:
+        return False
 
-    @abstractmethod
-    def submerged_volume(self, waterline_z: float) -> float:
-        """Return the submerged volume below waterline z (m^3)."""
+    def aabb(self) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+        raise NotImplementedError
 
-    @property
-    @abstractmethod
-    def top_z(self):
-        """Return the z position of the shape's top face (m)."""
-
-    def derived_mass_kg(self):
+    def effective_density(self) -> Optional[float]:
         if self.mass_kg is not None:
-            return self.mass_kg
-        if self.material_density_kg_per_m3 is not None:
-            return self.material_density_kg_per_m3 * self.mass_volume()
-        return None
-
-    def mass_volume(self) -> float:
-        """Volume used to compute mass if density is provided. Defaults to total volume.
-        Override for shells or mass-only parts.
-        """
-        return self.total_volume()
-
-    def waterline_depth_on_shape(self, waterline_z: float):
-        """How far up the shape the waterline reaches (m), capped to shape height. 
-        To determine whether the shape is submerged, partially submerged or not submerged at all"""
-        return cap(waterline_z - self.base_z, 0.0, max(0.0, self.top_z - self.base_z))
+            return None  # mass handled separately
+        return self.density
 
 
-@dataclass(kw_only=True)
-class Cuboid(Shape):
-    """Axis-aligned rectangular prism aligned with z-axis."""
+class OrientedCuboid3D(OrientedShape3D):
+    def __init__(self, *, length_x: float, width_y: float, height_z: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.length_x = length_x
+        self.width_y = width_y
+        self.height_z = height_z
 
-    length_x: float  # length along x (m)
-    width_y: float   # width along y (m)
-    height_z: float  # height along z (m)
+    def _to_local(self, p_world: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        px, py, pz = p_world
+        cx, cy, cz = self.center
+        v = (px - cx, py - cy, pz - cz)
+        # inverse rotation is transpose for orthonormal R
+        Rt = [list(row) for row in zip(*self.R)]
+        return _apply_rotation(Rt, v)
 
+    def is_point_inside_outer(self, p_world: Tuple[float, float, float]) -> bool:
+        lx, ly, lz = self._to_local(p_world)
+        return (abs(lx) <= self.length_x / 2) and (abs(ly) <= self.width_y / 2) and (abs(lz) <= self.height_z / 2)
+
+    def is_point_inside_inner(self, p_world: Tuple[float, float, float]) -> bool:
+        if not self.hollow or self.thickness_m <= 0:
+            return False
+        lx, ly, lz = self._to_local(p_world)
+        return (abs(lx) <= max(0.0, self.length_x / 2 - self.thickness_m)) and \
+               (abs(ly) <= max(0.0, self.width_y / 2 - self.thickness_m)) and \
+               (abs(lz) <= max(0.0, self.height_z / 2 - self.thickness_m))
+
+    def aabb(self) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+        # AABB of OBB: extents = |R| * half_sizes
+        hx, hy, hz = self.length_x / 2, self.width_y / 2, self.height_z / 2
+        absR = [[abs(a) for a in row] for row in self.R]
+        ex = absR[0][0] * hx + absR[0][1] * hy + absR[0][2] * hz
+        ey = absR[1][0] * hx + absR[1][1] * hy + absR[1][2] * hz
+        ez = absR[2][0] * hx + absR[2][1] * hy + absR[2][2] * hz
+        cx, cy, cz = self.center
+        return (cx - ex, cy - ey, cz - ez), (cx + ex, cy + ey, cz + ez)
+
+
+class OrientedCylinder3D(OrientedShape3D):
+    def __init__(self, *, radius: float, height_z: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.radius = radius
+        self.height_z = height_z
+
+    def _to_local(self, p_world: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        px, py, pz = p_world
+        cx, cy, cz = self.center
+        v = (px - cx, py - cy, pz - cz)
+        Rt = [list(row) for row in zip(*self.R)]
+        return _apply_rotation(Rt, v)
+
+    def is_point_inside_outer(self, p_world: Tuple[float, float, float]) -> bool:
+        lx, ly, lz = self._to_local(p_world)
+        return (lx * lx + ly * ly) <= (self.radius ** 2) and (abs(lz) <= self.height_z / 2)
+
+    def is_point_inside_inner(self, p_world: Tuple[float, float, float]) -> bool:
+        if not self.hollow or self.thickness_m <= 0:
+            return False
+        inner_r = max(0.0, self.radius - self.thickness_m)
+        lx, ly, lz = self._to_local(p_world)
+        return (lx * lx + ly * ly) <= (inner_r ** 2) and (abs(lz) <= max(0.0, self.height_z / 2 - self.thickness_m))
+
+    def aabb(self) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+        # AABB of oriented cylinder approximated by using bounding box of rotated local box of size (2r,2r,h)
+        hx, hy, hz = self.radius, self.radius, self.height_z / 2
+        absR = [[abs(a) for a in row] for row in self.R]
+        ex = absR[0][0] * hx + absR[0][1] * hy + absR[0][2] * hz
+        ey = absR[1][0] * hx + absR[1][1] * hy + absR[1][2] * hz
+        ez = absR[2][0] * hx + absR[2][1] * hy + absR[2][2] * hz
+        cx, cy, cz = self.center
+        return (cx - ex, cy - ey, cz - ez), (cx + ex, cy + ey, cz + ez)
+
+
+class OrientedSphere3D(OrientedShape3D):
+    def __init__(self, *, radius: float, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.radius = radius
+
+    def is_point_inside_outer(self, p_world: Tuple[float, float, float]) -> bool:
+        x, y, z = p_world
+        cx, cy, cz = self.center
+        dx, dy, dz = x - cx, y - cy, z - cz
+        return (dx * dx + dy * dy + dz * dz) <= (self.radius ** 2)
+
+    def is_point_inside_inner(self, p_world: Tuple[float, float, float]) -> bool:
+        if not self.hollow or self.thickness_m <= 0:
+            return False
+        inner_r = max(0.0, self.radius - self.thickness_m)
+        x, y, z = p_world
+        cx, cy, cz = self.center
+        dx, dy, dz = x - cx, y - cy, z - cz
+        return (dx * dx + dy * dy + dz * dz) <= (inner_r ** 2)
+
+    def aabb(self) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+        r = self.radius
+        cx, cy, cz = self.center
+        return (cx - r, cy - r, cz - r), (cx + r, cy + r, cz + r)
+
+
+class VoxelBody:
+    def __init__(self, shapes: List[OrientedShape3D], voxel_resolution_m: float) -> None:
+        self.shapes = shapes
+        self.res = max(1e-4, voxel_resolution_m)
+        # Compute global AABB
+        mins = [float("inf"), float("inf"), float("inf")]
+        maxs = [float("-inf"), float("-inf"), float("-inf")]
+        for s in self.shapes:
+            mn, mx = s.aabb()
+            for i in range(3):
+                mins[i] = min(mins[i], mn[i])
+                maxs[i] = max(maxs[i], mx[i])
+        self.aabb_min = tuple(mins)
+        self.aabb_max = tuple(maxs)
+
+    # Adapter surface similar to CompositeBody
     def total_volume(self) -> float:
-        return self.length_x * self.width_y * self.height_z
+        return self.submerged_volume(self.aabb_max[2] + 10.0)
 
     def submerged_volume(self, waterline_z: float) -> float:
-        submerged_height = cap(waterline_z - self.base_z, 0.0, self.height_z)
-        return self.length_x * self.width_y * submerged_height
-
-    @property
-    def top_z(self) -> float:
-        return self.base_z + self.height_z
-
-
-@dataclass(kw_only=True)
-class VerticalCylinder(Shape):
-    """Right circular cylinder oriented along z-axis."""
-
-    radius: float
-    height_z: float
-
-    def total_volume(self) -> float:
-        return pi * (self.radius ** 2) * self.height_z
-
-    def submerged_volume(self, waterline_z: float) -> float:
-        submerged_height = cap(waterline_z - self.base_z, 0.0, self.height_z)
-        return pi * (self.radius ** 2) * submerged_height
-
-    @property
-    def top_z(self) -> float:
-        return self.base_z + self.height_z
-
-
-@dataclass(kw_only=True)
-class HollowCuboid(Shape):
-    """A cuboid shell: outer minus inner cuboid. Displacement can be outer-only if desired.
-
-    By default contributes to displacement with its outer volume but mass uses shell volume.
-    Set contributes_to_displacement=False to make it mass-only.
-    """
-
-    outer_length_x: float
-    outer_width_y: float
-    outer_height_z: float
-    inner_length_x: float
-    inner_width_y: float
-    inner_height_z: float
-
-    def total_volume(self) -> float:
-        # Displacement volume: outer only (shell encloses water otherwise)
-        return self.outer_length_x * self.outer_width_y * self.outer_height_z
-
-    def mass_volume(self) -> float:
-        outer = self.outer_length_x * self.outer_width_y * self.outer_height_z
-        inner = max(0.0, self.inner_length_x) * max(0.0, self.inner_width_y) * max(0.0, self.inner_height_z)
-        inner = min(inner, outer)
-        return outer - inner
-
-    def submerged_volume(self, waterline_z: float) -> float:
-        submerged_height = cap(waterline_z - self.base_z, 0.0, self.outer_height_z)
-        return self.outer_length_x * self.outer_width_y * submerged_height
-
-    @property
-    def top_z(self) -> float:
-        return self.base_z + self.outer_height_z
-
-
-@dataclass(kw_only=True)
-class HollowVerticalCylinder(Shape):
-    """Cylindrical shell: outer radius minus inner radius, vertical."""
-
-    outer_radius: float
-    inner_radius: float
-    height_z: float
-
-    def total_volume(self) -> float:
-        # Displacement from outer cylinder
-        return pi * (self.outer_radius ** 2) * self.height_z
-
-    def mass_volume(self) -> float:
-        outer = pi * (self.outer_radius ** 2) * self.height_z
-        inner = pi * (max(0.0, min(self.inner_radius, self.outer_radius)) ** 2) * self.height_z
-        return max(0.0, outer - inner)
-
-    def submerged_volume(self, waterline_z: float) -> float:
-        submerged_height = cap(waterline_z - self.base_z, 0.0, self.height_z)
-        return pi * (self.outer_radius ** 2) * submerged_height
-
-    @property
-    def top_z(self) -> float:
-        return self.base_z + self.height_z
-
-
-@dataclass
-class CompositeBody:
-    """Collection of shapes acting as a single floating body.
-
-    This supports multiple parts (e.g., hull and outriggers). New shapes
-    simply need to implement the Shape API and can be added here.
-    """
-
-    parts: List[Shape]
-
-    def total_volume(self) -> float:
-        return sum(p.total_volume() for p in self.parts)
-
-    def submerged_volume(self, waterline_z: float) -> float:
-        return sum((p.submerged_volume(waterline_z) if p.contributes_to_displacement else 0.0) for p in self.parts)
+        x0, y0, z0 = self.aabb_min
+        x1, y1, z1 = self.aabb_max
+        res = self.res
+        vol = 0.0
+        cell = res ** 3
+        z = z0 + res / 2
+        while z <= min(waterline_z, z1 + res / 2):
+            y = y0 + res / 2
+            while y <= y1 + res / 2:
+                x = x0 + res / 2
+                while x <= x1 + res / 2:
+                    p = (x, y, z)
+                    inside = False
+                    for s in self.shapes:
+                        if not s.contributes_to_displacement:
+                            continue
+                        if s.is_point_inside_outer(p) and not s.is_point_inside_inner(p):
+                            inside = True
+                            break
+                    if inside:
+                        vol += cell
+                    x += res
+                y += res
+            z += res
+        return vol
 
     def max_top_z(self) -> float:
-        return max((p.top_z for p in self.parts), default=0.0)
+        return self.aabb_max[2]
 
     def min_base_z(self) -> float:
-        return min((p.base_z for p in self.parts), default=0.0)
+        return self.aabb_min[2]
 
     def total_mass_from_parts(self) -> float:
-        total = 0.0
-        for p in self.parts:
-            m = p.derived_mass_kg()
-            if m is not None:
-                total += m
-        return total
+        # Union mass across shapes by voxel sampling
+        x0, y0, z0 = self.aabb_min
+        x1, y1, z1 = self.aabb_max
+        res = self.res
+        cell = res ** 3
+        mass = 0.0
+        z = z0 + res / 2
+        while z <= z1 + res / 2:
+            y = y0 + res / 2
+            while y <= y1 + res / 2:
+                x = x0 + res / 2
+                while x <= x1 + res / 2:
+                    p = (x, y, z)
+                    occupied = False
+                    density = None
+                    for s in self.shapes:
+                        if s.is_point_inside_outer(p) and not s.is_point_inside_inner(p):
+                            occupied = True
+                            if s.mass_kg is not None:
+                                density = None
+                            else:
+                                density = s.density if s.density is not None else density
+                            break
+                    if occupied:
+                        if density is not None:
+                            mass += density * cell
+                        else:
+                            # Mass from explicit mass parts handled separately below
+                            mass += 0.0
+                    x += res
+                y += res
+            z += res
+        # Add explicit mass parts
+        for s in self.shapes:
+            if s.mass_kg is not None:
+                mass += s.mass_kg
+        return mass
 
 
 def buoyant_force_newtons(
@@ -216,7 +267,7 @@ def buoyant_force_newtons(
 
 
 def solve_equilibrium_waterline(
-    body: CompositeBody,
+    body,
     total_mass_kg: float,
     *,
     fluid_density_kg_per_m3: float = DEFAULT_FLUID_DENSITY,
@@ -291,9 +342,8 @@ def solve_equilibrium_waterline(
     return waterline, fb_actual
 
 
-def build_body_from_config(config: Dict[str, Any]) -> Tuple[CompositeBody, Optional[str], float, float]:
+def build_body_from_config(config):
     """Build CompositeBody from JSON config.
-
     Returns: (body, main_shape_name, fluid_density, gravity)
     """
     # Support multiple key names for convenience
@@ -303,7 +353,8 @@ def build_body_from_config(config: Dict[str, Any]) -> Tuple[CompositeBody, Optio
     shapes_cfg = config.get("shapes", [])
     electronics_mass_kg = float(config.get("electronics_mass_kg", 0.0))
 
-    parts: List[Shape] = []
+    parts: List[object] = []
+    voxel_shapes: List[OrientedShape3D] = []
     for sc in shapes_cfg:
         stype = sc.get("type")
         name = sc.get("name", "")
@@ -318,80 +369,92 @@ def build_body_from_config(config: Dict[str, Any]) -> Tuple[CompositeBody, Optio
         if mass is not None:
             mass = float(mass)
 
+        # Common flags for oriented shapes
+        rotation = sc.get("rotation_deg", {"x": 0, "y": 0, "z": 0})
+        rot_tuple = (float(rotation.get("x", 0.0)), float(rotation.get("y", 0.0)), float(rotation.get("z", 0.0)))
+        center = (float(sc.get("center_x", pos_x)), float(sc.get("center_y", pos_y)), float(sc.get("center_z", base_z)))
+        mass_only = bool(sc.get("mass_only", False))
+        contributes = bool(sc.get("contributes_to_displacement", True)) and (not mass_only)
+
         if stype == "cuboid":
             dims = sc.get("dimensions", {})
-            part = Cuboid(
-                base_z=base_z,
-                length_x=float(dims["length_x"]),
-                width_y=float(dims["width_y"]),
-                height_z=float(dims["height_z"]),
-                pos_x=pos_x,
-                pos_y=pos_y,
-                name=name,
-                material_density_kg_per_m3=density,
-                mass_kg=mass,
+            hollow = bool(sc.get("hollow", False))
+            thickness_m = float(sc.get("thickness_m", 0.0))
+            voxel_shapes.append(
+                OrientedCuboid3D(
+                    center=center,
+                    rotation_deg=rot_tuple,
+                    density=density,
+                    mass_kg=mass,
+                    hollow=hollow,
+                    thickness_m=thickness_m,
+                    contributes_to_displacement=contributes,
+                    name=name,
+                    length_x=float(dims["length_x"]),
+                    width_y=float(dims["width_y"]),
+                    height_z=float(dims["height_z"]),
+                )
             )
-        elif stype == "vertical_cylinder":
+        elif stype == "cylinder":
             dims = sc.get("dimensions", {})
-            part = VerticalCylinder(
-                base_z=base_z,
-                radius=float(dims["radius"]),
-                height_z=float(dims["height_z"]),
-                pos_x=pos_x,
-                pos_y=pos_y,
-                name=name,
-                material_density_kg_per_m3=density,
-                mass_kg=mass,
+            hollow = bool(sc.get("hollow", False))
+            thickness_m = float(sc.get("thickness_m", 0.0))
+            voxel_shapes.append(
+                OrientedCylinder3D(
+                    center=center,
+                    rotation_deg=rot_tuple,
+                    density=density,
+                    mass_kg=mass,
+                    hollow=hollow,
+                    thickness_m=thickness_m,
+                    contributes_to_displacement=contributes,
+                    name=name,
+                    radius=float(dims["radius"]),
+                    height_z=float(dims["height_z"]),
+                )
             )
-        elif stype == "hollow_cuboid":
+        elif stype == "sphere":
             dims = sc.get("dimensions", {})
-            inner = sc.get("inner_dimensions", {})
-            part = HollowCuboid(
-                base_z=base_z,
-                outer_length_x=float(dims["length_x"]),
-                outer_width_y=float(dims["width_y"]),
-                outer_height_z=float(dims["height_z"]),
-                inner_length_x=float(inner["length_x"]),
-                inner_width_y=float(inner["width_y"]),
-                inner_height_z=float(inner["height_z"]),
-                pos_x=pos_x,
-                pos_y=pos_y,
-                name=name,
-                material_density_kg_per_m3=density,
-                mass_kg=mass,
-            )
-        elif stype == "hollow_vertical_cylinder":
-            dims = sc.get("dimensions", {})
-            inner = sc.get("inner_dimensions", {})
-            part = HollowVerticalCylinder(
-                base_z=base_z,
-                outer_radius=float(dims["radius"]),
-                inner_radius=float(inner["radius"]),
-                height_z=float(dims["height_z"]),
-                pos_x=pos_x,
-                pos_y=pos_y,
-                name=name,
-                material_density_kg_per_m3=density,
-                mass_kg=mass,
+            hollow = bool(sc.get("hollow", False))
+            thickness_m = float(sc.get("thickness_m", 0.0))
+            voxel_shapes.append(
+                OrientedSphere3D(
+                    center=center,
+                    rotation_deg=rot_tuple,
+                    density=density,
+                    mass_kg=mass,
+                    hollow=hollow,
+                    thickness_m=thickness_m,
+                    contributes_to_displacement=contributes,
+                    name=name,
+                    radius=float(dims["radius"]),
+                )
             )
         else:
             raise ValueError(f"Unsupported shape type: {stype}")
-        parts.append(part)
 
-    body = CompositeBody(parts=parts)
+    # Decide body modeling approach: voxel union if requested, else analytic sum
+    voxel_cfg = config.get("voxel_union", {})
+    use_voxel = bool(voxel_cfg.get("enabled", True))
+    voxel_res = float(voxel_cfg.get("voxel_resolution_m", 0.01))
+    # Always use voxel body for unified behavior
+    body = VoxelBody(voxel_shapes, voxel_res)
     # Add electronics mass as a mass-only, non-displacing part
     if electronics_mass_kg > 0:
-        parts.append(
-            Cuboid(
-                base_z=body.min_base_z(),
-                length_x=0.0,
-                width_y=0.0,
-                height_z=0.0,
-                name="electronics",
-                pos_x=0.0,
-                pos_y=0.0,
+        # Add as a mass-only oriented tiny cuboid
+        voxel_shapes.append(
+            OrientedCuboid3D(
+                center=(0.0, 0.0, body.min_base_z()),
+                rotation_deg=(0.0, 0.0, 0.0),
+                density=None,
                 mass_kg=electronics_mass_kg,
+                hollow=False,
+                thickness_m=0.0,
                 contributes_to_displacement=False,
+                name="electronics",
+                length_x=1e-6,
+                width_y=1e-6,
+                height_z=1e-6,
             )
         )
     return body, main_shape_name, fluid_density, gravity
@@ -418,13 +481,6 @@ def run_from_config(path: str) -> None:
 
     print(f"Total mass (WEC): {total_mass:.3f} kg")
     print(f"Equilibrium waterline height (z): {waterline_z:.6f} m")
-    if main_name:
-        main = next((p for p in body.parts if p.name == main_name), None)
-        if main is not None:
-            depth = main.waterline_depth_on_shape(waterline_z)
-            print(f"Waterline depth on main body '{main_name}': {depth:.6f} m")
-        else:
-            print(f"Main body '{main_name}' not found in shapes.")
     print(f"Total buoyant force at equilibrium: {buoyant_force_n:.3f} N")
 
 
