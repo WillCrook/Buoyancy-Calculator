@@ -10,7 +10,7 @@ class WECModel:
         self.parts = []
         self.extra_mass = 0
 
-    def load_cad(self, filepath, scale=None, density=None, mass=None, ignore_holes=False):
+    def load_cad(self, filepath, scale=None, density=None, mass=None, ignore_holes=False, rotate=True, rotations=None):
         """Load a CAD/mesh file and scale to meters if needed."""
         mesh = trimesh.load(filepath)
         original_extents = mesh.extents.copy()
@@ -30,6 +30,22 @@ class WECModel:
                 else:
                     print("No holes filled; mesh repair not applied.")
         mesh.name = filepath
+
+        if rotate and rotations is not None:
+            center = mesh.center_mass
+            for rotation in rotations:
+                angle_rad = np.deg2rad(rotation['angle'])
+                axis = rotation['axis']
+                if axis == 'x':
+                    axis_vector = [1, 0, 0]
+                elif axis == 'y':
+                    axis_vector = [0, 1, 0]
+                elif axis == 'z':
+                    axis_vector = [0, 0, 1]
+                else:
+                    raise ValueError("rotation axis must be 'x', 'y', or 'z'")
+                rot_matrix = trimesh.transformations.rotation_matrix(angle_rad, axis_vector, point=center)
+                mesh.apply_transform(rot_matrix)
 
         if mass is not None and density is None:
             density = mass / mesh.volume
@@ -144,11 +160,14 @@ class WECModel:
                 waterline = combined.bounds[1][2]
                 submerged = None
             else:
+                print("The object sits in the water")
                 waterline = z_min
                 submerged = None
         else:
             waterline = brentq(func, z_min, z_max, xtol=1e-5)
             submerged = self.submerged_mesh(combined, waterline)
+
+        relative_waterline = waterline - combined.bounds[0][2]
 
         if submerged is None or (hasattr(submerged, 'volume') and submerged.volume == 0):
             cob = np.array([np.nan, np.nan, np.nan])
@@ -157,7 +176,7 @@ class WECModel:
 
         com = combined.center_mass
 
-        print(f"Equilibrium Waterline: {waterline:.3g} m")
+        print(f"Waterline: {relative_waterline:.3g} m above bottom of object")
         print(f"Submerged Volume: {submerged.volume if submerged is not None else 0:.3g} m^3")
         print(f"Center of Buoyancy: {cob}")
         print(f"Center of Mass: {com}")
@@ -178,10 +197,29 @@ class WECModel:
 wec = WECModel()
 
 #Load CAD
-wec.load_cad('Data/Right_Outrigger.stl', scale = 0.001, density = None, mass = 2.4, ignore_holes=False)
+# wec.load_cad('Data/Right_Outrigger.stl', 
+#              scale = 0.001, 
+#              density = None, 
+#              mass = 2.4, 
+#              ignore_holes=False, 
+#              rotate=True, 
+#              rotations=[{'axis':'y','angle':90}, {'axis': 'z', 'angle': 90}])
+
+# wec.load_cad('Data/Keel.stl', 
+#              scale = 0.001, 
+#              density = None, 
+#              mass = 1.9, 
+#              ignore_holes=False, 
+#              rotate=True, 
+#              rotations=[{'axis':'x','angle':90}, {'axis':'y','angle':0}, {'axis': 'z', 'angle': 90}])
+
 
 # Electronics mass
-wec.set_extra_mass(0) #kg for the electronics
+# wec.set_extra_mass(0) #kg for the electronics
 
+#test
+ball = trimesh.creation.icosphere(radius=0.02)  # 40 mm diameter
+ball.user_mass = 0.003  # mass in kg
+wec.parts = [ball]
 # Show mesh + waterline
 wec.show()
