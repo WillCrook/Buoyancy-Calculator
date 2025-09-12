@@ -19,27 +19,27 @@ class WECModel:
     def check_all_meshes_watertight(self, visualize=False):
         """
         Check all loaded parts for watertightness.
-        Prints a summary and optionally visualizes open edges.
+        Prints a summary and optionally visualizes open vertices in red.
         """
         for part in self.parts:
             if part.is_watertight:
                 print(f"Mesh '{part.name}' is watertight")
             else:
-                open_edges = part.edges_boundary
-                print(f"Mesh '{part.name}' is NOT watertight ")
-                print(f"  Number of open edges: {len(open_edges)}")
-                for i, edge in enumerate(open_edges[:10]):  # show first 10 edges
-                    print(f"    Edge {i}: {edge}")
-                if len(open_edges) > 10:
-                    print(f"    ...and {len(open_edges)-10} more edges")
-                
+                open_facets = part.facets_boundary
+                print(f"Mesh '{part.name}' is NOT watertight")
+                print(f"  Number of open facets: {len(open_facets)}")
+
                 if visualize:
-                    import trimesh
                     scene = trimesh.Scene()
                     scene.add_geometry(part)
-                    for edge in open_edges:
-                        line = trimesh.load_path(part.vertices[edge])
-                        scene.add_geometry(line)
+
+                    # Collect unique vertices from first 10 open facets
+                    vertices_indices = np.unique(np.concatenate(open_facets))
+                    # Create a point cloud for these vertices
+                    points = trimesh.points.PointCloud(vertices=part.vertices[vertices_indices])
+                    points.visual.vertex_colors = [255, 0, 0, 255]  # red
+                    scene.add_geometry(points)
+                    
                     scene.show()
         
     def load_cad(self, filepath, scale=None, density=None, mass=None, ignore_holes=False, rotate=True, rotations=None, manual_volume=None, manual_com=None):
