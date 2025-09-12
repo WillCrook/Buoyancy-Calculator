@@ -4,7 +4,7 @@ import numpy as np
 from trimesh.boolean import union
 from scipy.optimize import brentq
 
-# Reusable dummy submerged mesh class for manual volume cases
+#dummy submerged mesh class for manual volume cases
 class DummySubmerged:
     def __init__(self, volume, center_mass):
         self.volume = volume
@@ -16,10 +16,9 @@ class WECModel:
         self.g = g
         self.parts = []
     
-    def check_all_meshes_watertight(self, visualize=False):
+    def check_all_meshes_watertight(self, visualise=False):
         """
-        Check all loaded parts for watertightness.
-        Prints a summary and optionally visualizes open vertices in red.
+        Check all loaded parts for watertightness. When visualising the edges that aren't watertight they will output a red dot.
         """
         for part in self.parts:
             if part.is_watertight:
@@ -29,34 +28,22 @@ class WECModel:
                 print(f"Mesh '{part.name}' is NOT watertight")
                 print(f"  Number of open facets: {len(open_facets)}")
 
-                if visualize:
+                if visualise:
                     scene = trimesh.Scene()
                     scene.add_geometry(part)
 
-                    # Collect unique vertices from first 10 open facets
                     vertices_indices = np.unique(np.concatenate(open_facets))
-                    # Create a point cloud for these vertices
+                  
                     points = trimesh.points.PointCloud(vertices=part.vertices[vertices_indices])
-                    points.visual.vertex_colors = [255, 0, 0, 255]  # red
+                    points.visual.vertex_colors = [255, 0, 0, 255]  #red
                     scene.add_geometry(points)
                     
                     scene.show()
         
-    def load_cad(self, filepath, scale=None, density=None, mass=None, ignore_holes=False, rotate=True, rotations=None, manual_volume=None, manual_com=None):
-        """Load a CAD/mesh file and scale to meters if needed."""
+    def load_cad(self, filepath, scale=None, density=None, mass=None, rotate=True, rotations=None, manual_volume=None, manual_com=None):
+        """Loads a CAD/mesh file"""
         mesh = trimesh.load(filepath)
         mesh.apply_scale(scale)
-        
-        if not mesh.is_watertight:
-            if ignore_holes:
-                print(f"Note: Loaded mesh '{filepath}' is not watertight, but non-watertight regions are being ignored (assumed intentional holes/openings).")
-            else:
-                print(f"Warning: Loaded mesh '{filepath}' is not watertight. This may indicate accidental gaps or holes. Attempting to fill holes, but volume calculations may be inaccurate. Consider repairing or exporting a watertight STL.")
-                filled = mesh.fill_holes()
-                if filled:
-                    print("Mesh holes filled to attempt repair.")
-                else:
-                    print("No holes filled; mesh repair not applied.")
         mesh.name = filepath
 
         if rotate and rotations is not None:
@@ -254,8 +241,8 @@ class WECModel:
                 waterline = z_min
                 submerged = None
         else:
-            print("The object sits in the water")
             waterline = brentq(total_buoyancy, z_min, z_max, xtol=1e-5)
+            print("The object floats: it sits in the water")
             # Calculate submerged meshes at equilibrium waterline
             submerged_parts = []
             for part in self.parts:
@@ -295,12 +282,8 @@ class WECModel:
         relative_waterline = waterline - min_z
         return combined, waterline, relative_waterline, submerged, self._current_cob, combined_com, total_mass
 
-    def check_stability(self):
-        """Estimate roll and pitch stability of the floating object."""
-        if len(self.parts) == 0:
-            raise ValueError("No parts added for stability check")
-        
-        combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
+    def check_stability(self, combined, waterline, relative_waterline, submerged, cob, com, mass):
+        """Estimate roll and pitch stability of the floating object, given equilibrium results."""
         if submerged is None:
             print("Object is not floating, stability check not applicable.")
             return None, None, None, None
@@ -340,7 +323,7 @@ class WECModel:
     def show(self):
         """Visualise the WEC and waterline using equilibrium waterline calculation."""
         combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
-        GM_x, GM_y, stable_roll, stable_pitch = self.check_stability()
+        GM_x, GM_y, stable_roll, stable_pitch = self.check_stability(combined, waterline, relative_waterline, submerged, cob, com, mass)
         # Create the fluid
         # Since combined is a Scene, get bounds from parts
         min_corner = np.min([p.bounds[0] for p in self.parts], axis=0)
@@ -387,7 +370,6 @@ wec.load_cad('Data/Keel Fin.stl',
              scale = 0.001, 
              density = None, 
              mass = 1.9, 
-             ignore_holes=False, 
              rotate=False,
              rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
             )
@@ -396,7 +378,6 @@ wec.load_cad('Data/Left Outrigger.stl',
              scale = 0.001, 
              density = None, 
              mass = 2.4, 
-             ignore_holes=False, 
              rotate=False,
              rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
             )
@@ -405,7 +386,6 @@ wec.load_cad('Data/Right Outrigger.stl',
              scale = 0.001, 
              density = None, 
              mass = 2.4, 
-             ignore_holes=False, 
              rotate=False,
              rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
             )
@@ -414,7 +394,6 @@ wec.load_cad('Data/Keel Weight.stl',
              scale = 0.001, 
              density = None, 
              mass = 4.5, 
-             ignore_holes=False, 
              rotate=False,
              rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
             )
@@ -423,7 +402,6 @@ wec.load_cad('Data/Hull.stl',
              scale = 0.001, 
              density = None, 
              mass = 7.5, #with electronics 
-             ignore_holes=True, 
              rotate=False,
              rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}],
              manual_volume=0.0314,
@@ -438,8 +416,8 @@ wec.load_cad('Data/Hull.stl',
 #              rotations=[{'axis' : 'x', 'angle' : 90}],
 #             )
 
-# Check watertightness of all meshes and optionally visualize open edges
-wec.check_all_meshes_watertight(visualize=True)
+# Check watertightness of all meshes.
+# wec.check_all_meshes_watertight(visualise=True)
 
 # Show mesh + waterline
 wec.show()
