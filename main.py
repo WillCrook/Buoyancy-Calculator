@@ -454,25 +454,28 @@ class WECModel:
         # Only visualise, do not print results here.
         scene.show()
 
-    def show_results(self):
+    def show_results(self, output_to_terminal=True):
         """
         Print equilibrium and stability results. This method does not modify meshes or scene data.
         """
         combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
         GM_x, GM_y, stable_roll, stable_pitch = self.check_stability(combined, waterline, relative_waterline, submerged, cob, com, mass)
-        print(f"Waterline: {relative_waterline:.3g} m above bottom of object")
-        print(f"Total Mass: {mass:.3g} kg")
-        # Calculate and print overall density
         total_volume = sum([p._manual_volume if hasattr(p, '_manual_volume') and p._manual_volume is not None else p.volume for p in self.parts])
         overall_density = mass / total_volume if total_volume > 0 else float('nan')
-        print(f"Overall Density: {overall_density:.3g} kg/m^3")
-        print(f"Submerged Volume: {submerged.volume if submerged is not None else 0:.3g} m^3")
-        print(f"Center of Buoyancy: {cob}")
-        print(f"Center of Mass: {com}")
-        if GM_x is not None and GM_y is not None:
-            print(f"Stability Check:")
-            print(f"  Roll GM: {GM_x:.3g} m -> {'Stable' if stable_roll else 'Unstable'}")
-            print(f"  Pitch GM: {GM_y:.3g} m -> {'Stable' if stable_pitch else 'Unstable'}")
+
+        if output_to_terminal:
+            print(f"Waterline: {relative_waterline:.3g} m above bottom of object")
+            print(f"Total Mass: {mass:.3g} kg")    
+            print(f"Overall Density: {overall_density:.3g} kg/m^3")
+            print(f"Submerged Volume: {submerged.volume if submerged is not None else 0:.3g} m^3")
+            print(f"Center of Buoyancy: {cob}")
+            print(f"Center of Mass: {com}")
+            if GM_x is not None and GM_y is not None:
+                print(f"Stability Check:")
+                print(f"  Roll GM: {GM_x:.3g} m -> {'Stable' if stable_roll else 'Unstable'}")
+                print(f"  Pitch GM: {GM_y:.3g} m -> {'Stable' if stable_pitch else 'Unstable'}")
+        else:
+            return relative_waterline, mass, overall_density, submerged.volume, cob, com, GM_x, GM_y, stable_roll, stable_pitch
     
 
 if __name__ == "__main__":

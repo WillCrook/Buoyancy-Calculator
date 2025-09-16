@@ -84,11 +84,8 @@ class PartParameterWidget(QWidget):
 
         # Scale
         layout.addWidget(QLabel("Scale (0.001 = mm → m):"), 0, 0)
-        self.scale = QDoubleSpinBox()
-        self.scale.setRange(0.001, 100.0)
-        self.scale.setSingleStep(0.01)
-        self.scale.setDecimals(6)
-        self.scale.setValue(defaults.get('scale', 0.001))
+        self.scale = QLineEdit()
+        self.scale.setText(str(defaults.get('scale', 0.001)))
         layout.addWidget(self.scale, 0, 1)
 
         # Mass vs Density toggle
@@ -98,18 +95,14 @@ class PartParameterWidget(QWidget):
 
         # Mass
         layout.addWidget(QLabel("Mass (kg):"), 2, 0)
-        self.mass = QDoubleSpinBox()
-        self.mass.setRange(0.0, 1e6)
-        self.mass.setDecimals(4)
-        self.mass.setValue(defaults.get('mass', 0.0))
+        self.mass = QLineEdit()
+        self.mass.setText(str(defaults.get('mass', 0.0)))
         layout.addWidget(self.mass, 2, 1)
 
         # Density
         layout.addWidget(QLabel("Density (kg/m³):"), 3, 0)
-        self.density = QDoubleSpinBox()
-        self.density.setRange(0.0, 50000.0)
-        self.density.setDecimals(2)
-        self.density.setValue(defaults.get('density', 0.0))
+        self.density = QLineEdit()
+        self.density.setText(str(defaults.get('density', 0.0)))
         layout.addWidget(self.density, 3, 1)
 
         # Rotation toggle
@@ -121,24 +114,18 @@ class PartParameterWidget(QWidget):
 
         # Rotations
         layout.addWidget(QLabel("Rotation X (deg):"), 5, 0)
-        self.rot_x = QDoubleSpinBox()
-        self.rot_x.setRange(-360, 360)
-        self.rot_x.setDecimals(2)
-        self.rot_x.setValue(defaults.get('rot_x', 0.0))
+        self.rot_x = QLineEdit()
+        self.rot_x.setText(str(defaults.get('rot_x', 0.0)))
         layout.addWidget(self.rot_x, 5, 1)
 
         layout.addWidget(QLabel("Rotation Y (deg):"), 6, 0)
-        self.rot_y = QDoubleSpinBox()
-        self.rot_y.setRange(-360, 360)
-        self.rot_y.setDecimals(2)
-        self.rot_y.setValue(defaults.get('rot_y', 0.0))
+        self.rot_y = QLineEdit()
+        self.rot_y.setText(str(defaults.get('rot_y', 0.0)))
         layout.addWidget(self.rot_y, 6, 1)
 
         layout.addWidget(QLabel("Rotation Z (deg):"), 7, 0)
-        self.rot_z = QDoubleSpinBox()
-        self.rot_z.setRange(-360, 360)
-        self.rot_z.setDecimals(2)
-        self.rot_z.setValue(defaults.get('rot_z', 0.0))
+        self.rot_z = QLineEdit()
+        self.rot_z.setText(str(defaults.get('rot_z', 0.0)))
         layout.addWidget(self.rot_z, 7, 1)
 
         # Manual override toggles: separate volume and COM
@@ -146,39 +133,33 @@ class PartParameterWidget(QWidget):
         self.override_volume_cb.setChecked(defaults.get('manual_volume', None) is not None)
         layout.addWidget(self.override_volume_cb, 8, 0, 1, 2)
 
-        self.override_com_cb = QCheckBox("Override COM")
+        self.override_com_cb = QCheckBox("Override COM (Only toggle if your calculating the COM for every part, otherwise leave it!)")
         self.override_com_cb.setChecked(defaults.get('manual_com', None) is not None)
         layout.addWidget(self.override_com_cb, 9, 0, 1, 2)
 
         # Manual volume
         layout.addWidget(QLabel("Manual Volume (m³):"), 10, 0)
-        self.manual_volume = QDoubleSpinBox()
-        self.manual_volume.setRange(0.0, 1e6)
-        self.manual_volume.setDecimals(6)
-        self.manual_volume.setValue(defaults.get('manual_volume', 0.0) if defaults.get('manual_volume', None) is not None else 0.0)
+        self.manual_volume = QLineEdit()
+        self.manual_volume.setText(
+            str(defaults.get('manual_volume', 0.0) if defaults.get('manual_volume', None) is not None else 0.0)
+        )
         layout.addWidget(self.manual_volume, 10, 1)
 
         # Manual center of mass (x,y,z)
         layout.addWidget(QLabel("Manual Center of Mass X (m):"), 11, 0)
-        self.manual_com_x = QDoubleSpinBox()
-        self.manual_com_x.setRange(-1e6, 1e6)
-        self.manual_com_x.setDecimals(6)
-        mc = defaults.get('manual_com', [0.0,0.0,0.0])
-        self.manual_com_x.setValue(mc[0] if mc is not None else 0.0)
+        self.manual_com_x = QLineEdit()
+        mc = defaults.get('manual_com', [0.0, 0.0, 0.0])
+        self.manual_com_x.setText(str(mc[0] if mc is not None else 0.0))
         layout.addWidget(self.manual_com_x, 11, 1)
 
         layout.addWidget(QLabel("Manual Center of Mass Y (m):"), 12, 0)
-        self.manual_com_y = QDoubleSpinBox()
-        self.manual_com_y.setRange(-1e6, 1e6)
-        self.manual_com_y.setDecimals(6)
-        self.manual_com_y.setValue(mc[1] if mc is not None else 0.0)
+        self.manual_com_y = QLineEdit()
+        self.manual_com_y.setText(str(mc[1] if mc is not None else 0.0))
         layout.addWidget(self.manual_com_y, 12, 1)
 
         layout.addWidget(QLabel("Manual Center of Mass Z (m):"), 13, 0)
-        self.manual_com_z = QDoubleSpinBox()
-        self.manual_com_z.setRange(-1e6, 1e6)
-        self.manual_com_z.setDecimals(6)
-        self.manual_com_z.setValue(mc[2] if mc is not None else 0.0)
+        self.manual_com_z = QLineEdit()
+        self.manual_com_z.setText(str(mc[2] if mc is not None else 0.0))
         layout.addWidget(self.manual_com_z, 13, 1)
 
         self.setLayout(layout)
@@ -218,9 +199,9 @@ class PartParameterWidget(QWidget):
 
     def get_params(self):
         params = {
-            'scale': self.scale.value(),
-            'mass': self.mass.value() if not self.use_density_cb.isChecked() else 0.0,
-            'density': self.density.value() if self.use_density_cb.isChecked() else 0.0,
+            'scale': float(self.scale.text()),
+            'mass': float(self.mass.text()) if not self.use_density_cb.isChecked() else 0.0,
+            'density': float(self.density.text()) if self.use_density_cb.isChecked() else 0.0,
             'rotate': self.apply_rotations_cb.isChecked(),
             'rotations': [],
             'manual_volume': None,
@@ -228,17 +209,17 @@ class PartParameterWidget(QWidget):
         }
         if params['rotate']:
             params['rotations'] = [
-                {'axis': 'x', 'angle': self.rot_x.value()},
-                {'axis': 'y', 'angle': self.rot_y.value()},
-                {'axis': 'z', 'angle': self.rot_z.value()},
+                {'axis': 'x', 'angle': float(self.rot_x.text())},
+                {'axis': 'y', 'angle': float(self.rot_y.text())},
+                {'axis': 'z', 'angle': float(self.rot_z.text())},
             ]
         if self.override_volume_cb.isChecked():
-            params['manual_volume'] = self.manual_volume.value()
+            params['manual_volume'] = float(self.manual_volume.text())
         if self.override_com_cb.isChecked():
             params['manual_com'] = [
-                self.manual_com_x.value(),
-                self.manual_com_y.value(),
-                self.manual_com_z.value()
+                float(self.manual_com_x.text()),
+                float(self.manual_com_y.text()),
+                float(self.manual_com_z.text())
             ]
         return params
 
@@ -313,6 +294,13 @@ class MainWindow(QMainWindow):
         self.visualize_btn = QPushButton("Visualize in Trimesh Viewer")
         self.visualize_btn.clicked.connect(self.launch_viewer)
         right_layout.addWidget(self.visualize_btn)
+
+        # Progress bar for solver
+        from PyQt6.QtWidgets import QProgressBar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setValue(0)
+        right_layout.addWidget(self.progress_bar)
 
         self.result_group = QGroupBox("Solver Outputs")
         self.result_layout = QFormLayout()
@@ -475,59 +463,103 @@ class MainWindow(QMainWindow):
     def run_solver(self):
         self.collect_parameters()
         filepaths = [p['filename'] for p in self.parts]
-        # Prepare parameter dicts for WECModel using get_params() results directly
         param_list = []
         for p in self.parts:
-            param_list.append(p['params'])
+            param_list.append((p['filename'],
+                               p['params'].get('scale', 0.001),
+                               p['params'].get('mass', 0.0),
+                               p['params'].get('density', 0.0),
+                               p['params'].get('rotate', False),
+                               p['params'].get('rotations', []),
+                               p['params'].get('manual_volume', None),
+                               p['params'].get('manual_com', None)))
         try:
-
             wec = WECModel()
-
-            for path, scale, mass, manual_volume, rotate, rotations, manual_volume, manual_com in tqdm(param_list, desc="Loading CAD files"):
-                wec.load_cad(path,
-                            scale=scale,
-                            density=None,
-                            mass=mass,
-                            rotate=rotate,
-                            rotations=rotations,
-                            manual_volume=manual_volume,
-                            manual_com = manual_com
-                            )
-            
+            self.progress_bar.setMaximum(len(param_list))
+            self.progress_bar.setValue(0)
+            for i, (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in enumerate(param_list):
+                wec.load_cad(
+                    filepath,
+                    scale=scale,
+                    density=density,
+                    mass=mass,
+                    rotate=rotate,
+                    rotations=rotations,
+                    manual_volume=manual_volume,
+                    manual_com=manual_com
+                )
+                self.progress_bar.setValue(i+1)
             # Run equilibrium solver
-            result = wec.solve_equilibrium()
-            # Display outputs
+            (relative_waterline, 
+             total_mass, 
+             overall_density, 
+             submerged_volume, 
+             cob, com, 
+             GM_x, GM_y, 
+             stable_roll, stable_pitch
+             ) = wec.show_results(output_to_terminal=False)
+
+            # Update GUI display to show results in self.result_layout
             self.result_layout.clear()
-            for i in reversed(range(self.result_layout.count())):
-                self.result_layout.removeRow(i)
-            self.result_layout.addRow("Waterline (z):", QLabel(f"{result.get('waterline', 0):.4f} m"))
-            self.result_layout.addRow("Total Mass:", QLabel(f"{result.get('total_mass', 0):.4f} kg"))
-            cob = result.get('center_of_buoyancy', [0,0,0])
-            com = result.get('center_of_mass', [0,0,0])
-            self.result_layout.addRow("Center of Buoyancy:", QLabel(f"{cob}"))
-            self.result_layout.addRow("Center of Mass:", QLabel(f"{com}"))
-            self.result_layout.addRow("Submerged Volume:", QLabel(f"{result.get('submerged_volume', 0):.4f} m³"))
-            # Update history file with current parameters
-            for part in self.parts:
-                self.history[part['filename']] = part['params']
-            try:
-                with open("history.json", "w") as f:
-                    json.dump(self.history, f, indent=2)
-            except Exception as e:
-                print(f"Error saving history.json: {e}")
+            # Waterline
+            self.result_layout.addRow(QLabel("Waterline:"), QLabel(f"{relative_waterline:.3g} m above bottom of object"))
+            # Total Mass
+            self.result_layout.addRow(QLabel("Total Mass:"), QLabel(f"{total_mass:.3g} kg"))
+            # Overall Density
+            # Compute total volume as in show_results (mass / density)
+            if overall_density > 0:
+                total_volume = total_mass / overall_density
+            else:
+                total_volume = 0.0
+            self.result_layout.addRow(QLabel("Overall Density:"), QLabel(f"{overall_density:.3g} kg/m^3"))
+            # Submerged Volume
+            self.result_layout.addRow(QLabel("Submerged Volume:"), QLabel(f"{submerged_volume:.3g} m^3"))
+            # Center of Buoyancy
+            self.result_layout.addRow(QLabel("Center of Buoyancy:"), QLabel(str(cob)))
+            # Center of Mass
+            self.result_layout.addRow(QLabel("Center of Mass:"), QLabel(str(com)))
+            # Stability Check
+            stability_label = QLabel("Stability Check:")
+            stability_label.setStyleSheet("font-weight: bold;")
+            self.result_layout.addRow(stability_label)
+            # Roll GM and stability
+            roll_stable_str = "Stable" if stable_roll else "Unstable"
+            self.result_layout.addRow(QLabel("  Roll GM:"), QLabel(f"{GM_x:.3g} m -> {roll_stable_str}"))
+            # Pitch GM and stability
+            pitch_stable_str = "Stable" if stable_pitch else "Unstable"
+            self.result_layout.addRow(QLabel("  Pitch GM:"), QLabel(f"{GM_y:.3g} m -> {pitch_stable_str}"))
         except Exception as e:
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Solver Error", f"{e}\n{tb}")
-
+        except:
+            pass
+        
     def launch_viewer(self):
         self.collect_parameters()
-        filepaths = [p['filename'] for p in self.parts]
         param_list = []
         for p in self.parts:
-            param_list.append(p['params'])
+            param_list.append((p['filename'],
+                               p['params'].get('scale', 0.001),
+                               p['params'].get('mass', 0.0),
+                               p['params'].get('density', 0.0),
+                               p['params'].get('rotate', False),
+                               p['params'].get('rotations', []),
+                               p['params'].get('manual_volume', None),
+                               p['params'].get('manual_com', None)))
         try:
-            model = WECModel(filepaths, params=param_list)
-            model.show_scene()
+            wec = WECModel()
+            for (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in param_list:
+                wec.load_cad(
+                    filepath,
+                    scale=scale,
+                    density=density,
+                    mass=mass,
+                    rotate=rotate,
+                    rotations=rotations,
+                    manual_volume=manual_volume,
+                    manual_com=manual_com
+                )
+            wec.visualiser()
         except Exception as e:
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Viewer Error", f"{e}\n{tb}")
