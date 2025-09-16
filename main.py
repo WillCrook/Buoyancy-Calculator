@@ -1,14 +1,81 @@
-
+import os
+import pickle
+import hashlib
 import trimesh
 import numpy as np
 from trimesh.boolean import union
 from scipy.optimize import brentq
+import gmsh
+from tqdm import tqdm
 
 #dummy submerged mesh class for manual volume cases
 class DummySubmerged:
     def __init__(self, volume, center_mass):
         self.volume = volume
         self.center_mass = center_mass
+
+
+def step_to_trimesh(filepath, mesh_size_factor=0.005):
+    """
+    Convert STEP file to trimesh using Gmsh.
+    mesh_size_factor controls the resolution of meshing relative to bounding box size.
+    Implements caching to avoid recomputation.
+    """
+    file_hash = f"{filepath}_{os.path.getmtime(filepath)}"
+    hash_key = hashlib.sha256(file_hash.encode()).hexdigest()
+    cache_dir = ".mesh_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, f"{hash_key}.pkl")
+    if os.path.exists(cache_file):
+        with open(cache_file, "rb") as f:
+            mesh = pickle.load(f)
+            return mesh
+
+    gmsh.initialize()
+    gmsh.option.setNumber("General.NumThreads", 0)
+    gmsh.option.setNumber("General.Terminal", 0)
+    gmsh.model.add("step_model")
+    gmsh.model.occ.importShapes(filepath)
+    gmsh.model.occ.synchronize()
+
+    bbox = gmsh.model.getBoundingBox(-1, -1)
+    size = max(bbox[3]-bbox[0], bbox[4]-bbox[1], bbox[5]-bbox[2])
+    char_len = size * mesh_size_factor
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMin", char_len)
+    gmsh.option.setNumber("Mesh.CharacteristicLengthMax", char_len)
+
+    # ---- Compute exact volume & centroid via OCC (no 3D mesh needed) ----
+    entities_3d = gmsh.model.getEntities(3)
+    exact_volume = 0.0
+    weighted_com = np.zeros(3)
+    for dim, tag in entities_3d:
+        vol = gmsh.model.occ.getMass(dim, tag)
+        com = np.array(gmsh.model.occ.getCenterOfMass(dim, tag))
+        exact_volume += vol
+        weighted_com += com * vol
+    exact_com = weighted_com / exact_volume if exact_volume > 0 else np.zeros(3)
+
+    # ---- Generate 2D surface mesh for visualisation ----
+    gmsh.model.mesh.generate(2)
+
+    # ---- Extract surface mesh for visualization ----
+    node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
+    nodes = np.array(node_coords).reshape(-1, 3)
+
+    faces = []
+    types, element_tags, node_tags = gmsh.model.mesh.getElements(dim=2)
+    for nt in node_tags:
+        faces.extend(np.array(nt).reshape(-1, 3) - 1)
+
+    gmsh.finalize()
+
+    mesh = trimesh.Trimesh(vertices=nodes, faces=np.array(faces))
+    mesh._manual_volume = exact_volume
+    mesh.center_mass = exact_com
+    # Save to cache before returning
+    with open(cache_file, "wb") as f:
+        pickle.dump(mesh, f)
+    return mesh
 
 class WECModel:
     def __init__(self, fluid_density=1000, g=9.81): #density in kg/m^3 and g field strength in m/s^2
@@ -40,9 +107,12 @@ class WECModel:
                     
                     scene.show()
         
-    def load_cad(self, filepath, scale=None, density=None, mass=None, rotate=True, rotations=None, manual_volume=None, manual_com=None):
-        """Loads a CAD/mesh file"""
-        mesh = trimesh.load(filepath)
+    def load_cad(self, filepath, scale=None, density=None, mass=None, rotate=False, rotations=None, manual_volume=None, manual_com=None):
+        """Loads a CAD/mesh file, uses cache for STEP files via step_to_trimesh."""
+        if filepath.lower().endswith((".step", ".stp")):
+            mesh = step_to_trimesh(filepath)
+        else:
+            mesh = trimesh.load(filepath)
         mesh.apply_scale(scale)
         mesh.name = filepath
 
@@ -83,7 +153,6 @@ class WECModel:
 
         self.parts.append(mesh)
 
-       
         print(f"Loaded CAD part: {filepath}")
         print(f"  Scaled size (extents): {mesh.extents}")
         if manual_volume is not None:
@@ -179,8 +248,38 @@ class WECModel:
             return submerged
 
     def solve_equilibrium(self):
+        import pickle, hashlib
         if len(self.parts) == 0:
             raise ValueError("No parts added")
+
+        # --- Caching key construction ---
+        # Gather filenames, mtimes, manual volumes/masses, fluid_density, gravity
+        cache_items = []
+        for part in self.parts:
+            filename = getattr(part, "name", None)
+            if filename is not None and os.path.isfile(filename):
+                mtime = os.path.getmtime(filename)
+            else:
+                mtime = "nofile"
+            manual_volume = getattr(part, "_manual_volume", None)
+            user_mass = getattr(part, "user_mass", None)
+            cache_items.append(f"{filename}|{mtime}|{manual_volume}|{user_mass}")
+        cache_items.append(f"fluid_density={self.fluid_density}")
+        cache_items.append(f"gravity={self.g}")
+        cache_key_str = ";".join(str(x) for x in cache_items)
+        hash_key = hashlib.sha256(cache_key_str.encode()).hexdigest()
+        cache_dir = ".equilibrium_cache"
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_file = os.path.join(cache_dir, f"{hash_key}.pkl")
+
+        # Check for cached result
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "rb") as f:
+                    cached = pickle.load(f)
+                return cached
+            except Exception:
+                pass  # If cache is corrupt, fall through to recalc
 
         # Calculate total mass and total weight
         total_mass = 0
@@ -280,7 +379,14 @@ class WECModel:
         combined = trimesh.Scene(self.parts)
 
         relative_waterline = waterline - min_z
-        return combined, waterline, relative_waterline, submerged, self._current_cob, combined_com, total_mass
+        result_tuple = (combined, waterline, relative_waterline, submerged, self._current_cob, combined_com, total_mass)
+        # Save to cache
+        try:
+            with open(cache_file, "wb") as f:
+                pickle.dump(result_tuple, f)
+        except Exception:
+            pass
+        return result_tuple
 
     def check_stability(self, combined, waterline, relative_waterline, submerged, cob, com, mass):
         """Estimate roll and pitch stability of the floating object, given equilibrium results."""
@@ -320,10 +426,13 @@ class WECModel:
 
         return GM_x, GM_y, stable_roll, stable_pitch
 
-    def show(self):
-        """Visualise the WEC and waterline using equilibrium waterline calculation."""
+    def visualiser(self):
+        """
+        Visualise the WEC and waterline using equilibrium waterline calculation.
+        This method only handles scene creation and showing the mesh, without printing results.
+        """
         combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
-        GM_x, GM_y, stable_roll, stable_pitch = self.check_stability(combined, waterline, relative_waterline, submerged, cob, com, mass)
+        
         # Create the fluid
         # Since combined is a Scene, get bounds from parts
         min_corner = np.min([p.bounds[0] for p in self.parts], axis=0)
@@ -339,11 +448,18 @@ class WECModel:
             center_mass[1],
             waterline - water_depth / 2
         ])
-        plane.visual.face_colors = [0, 100, 255, 100] 
+        plane.visual.face_colors = [0, 100, 255, 100]
         scene = trimesh.Scene(list(self.parts) + [plane])
-        scene.set_camera(angles=(np.pi/2, 0, 0), distance=extents.max() * 5, center=center_mass )
+        scene.set_camera(angles=(np.pi/2, 0, 0), distance=extents.max() * 5, center=center_mass)
+        # Only visualise, do not print results here.
+        scene.show()
 
-        # OUTPUT
+    def show_results(self):
+        """
+        Print equilibrium and stability results. This method does not modify meshes or scene data.
+        """
+        combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
+        GM_x, GM_y, stable_roll, stable_pitch = self.check_stability(combined, waterline, relative_waterline, submerged, cob, com, mass)
         print(f"Waterline: {relative_waterline:.3g} m above bottom of object")
         print(f"Total Mass: {mass:.3g} kg")
         # Calculate and print overall density
@@ -353,71 +469,40 @@ class WECModel:
         print(f"Submerged Volume: {submerged.volume if submerged is not None else 0:.3g} m^3")
         print(f"Center of Buoyancy: {cob}")
         print(f"Center of Mass: {com}")
-
-        if GM_x and GM_y is not None:
+        if GM_x is not None and GM_y is not None:
             print(f"Stability Check:")
             print(f"  Roll GM: {GM_x:.3g} m -> {'Stable' if stable_roll else 'Unstable'}")
             print(f"  Pitch GM: {GM_y:.3g} m -> {'Stable' if stable_pitch else 'Unstable'}")
-        
-        scene.show()
+    
 
-wec = WECModel()
-wec.set_fluid_density(1025)  # water kg/m^3
-wec.set_gravity(9.81)        # g field strength m/s^2
+if __name__ == "__main__":
+    wec = WECModel()
+    wec.set_fluid_density(1025)  # water kg/m^3
+    wec.set_gravity(9.81)        # g field strength m/s^2
 
-#Load CAD
-wec.load_cad('Data/Keel Fin.stl', 
-             scale = 0.001, 
-             density = None, 
-             mass = 1.9, 
-             rotate=False,
-             rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
-            )
+    #Load CAD
+    files = [
+        ('Data/WEC STEP/Keel_1.step', 0.001, 1.9, None),
+        ('Data/WEC STEP/Left_Outrigger.step', 0.001, 2.4, None),
+        ('Data/WEC STEP/Right_outrigger_1.step', 0.001, 2.4, None),
+        ('Data/WEC STEP/Keel_Weight_1.step', 0.001, 4.5, None),
+        ('Data/WEC STEP/Body_1.step', 0.001, 7.5, 0.0314),  # with electronics
+    ]
 
-wec.load_cad('Data/Left Outrigger.stl', 
-             scale = 0.001, 
-             density = None, 
-             mass = 2.4, 
-             rotate=False,
-             rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
-            )
+    for path, scale, mass, manual_volume in tqdm(files, desc="Loading CAD files"):
+        wec.load_cad(path,
+                     scale=scale,
+                     density=None,
+                     mass=mass,
+                     rotate=False,
+                     rotations=[{'axis': 'y', 'angle': 0}, {'axis': 'x', 'angle': 0}, {'axis': 'z', 'angle': 0}],
+                     manual_volume=manual_volume
+                     )
 
-wec.load_cad('Data/Right Outrigger.stl', 
-             scale = 0.001, 
-             density = None, 
-             mass = 2.4, 
-             rotate=False,
-             rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
-            )
+    # Check watertightness of all meshes.
+    # wec.check_all_meshes_watertight(visualise=True)
 
-wec.load_cad('Data/Keel Weight.stl', 
-             scale = 0.001, 
-             density = None, 
-             mass = 4.5, 
-             rotate=False,
-             rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}]
-            )
-
-wec.load_cad('Data/Hull.stl', 
-             scale = 0.001, 
-             density = None, 
-             mass = 7.5, #with electronics 
-             rotate=False,
-             rotations=[{'axis' : 'y', 'angle' : 0}, {'axis' : 'x', 'angle' : 0}],
-             manual_volume=0.0314,
-            )
-
-# wec.load_cad('Data/WEC 3.stl', 
-#              scale = 0.001, 
-#              density = None, 
-#              mass = 18.7, 
-#              ignore_holes=True, 
-#              rotate=False,
-#              rotations=[{'axis' : 'x', 'angle' : 90}],
-#             )
-
-# Check watertightness of all meshes.
-# wec.check_all_meshes_watertight(visualise=True)
-
-# Show mesh + waterline
-wec.show()
+    # Show mesh + waterline
+    wec.show_results()
+    wec.visualiser()
+    

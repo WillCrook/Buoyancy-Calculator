@@ -1,3 +1,6 @@
 *.json
 *.venv
 *.stl
+*__pycache__
+*.equilibrium_cache
+*.mesh_cache
