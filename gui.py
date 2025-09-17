@@ -8,6 +8,11 @@ from contextlib import contextmanager
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "Data", "Assets", "history.json")
 
+# Helper for resource paths (PyInstaller-friendly)
+def resource_path(relative_path):
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
 # Third-party imports
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -223,7 +228,7 @@ class MainWindow(QMainWindow):
         self.part_widgets = {}  # filename -> PartParameterWidget
         self.history = {}
         self.current_config_file = None  # Track current config file
-        icon_path = os.path.join(BASE_DIR, "Data", "Fetch", "fetch.ico")
+        icon_path = resource_path(os.path.join("Data", "Assets", "fetch.ico"))
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
