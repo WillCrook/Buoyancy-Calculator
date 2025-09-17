@@ -171,18 +171,21 @@ class WECModel:
 
     def list_parts(self):
         """Print summary of all parts currently loaded."""
-        print("All loaded WEC parts:")
+        if self.parts == []:
+            print("No Loaded Parts")
+        else:
+            print("All loaded WEC parts:")
 
-        for i, part in enumerate(self.parts, start=1):
-            print(f"Part {i}:")
-            print(f"  Extents: {part.extents}")
-            vol = part._manual_volume if hasattr(part, '_manual_volume') and part._manual_volume is not None else part.volume
-            print(f"  Volume: {vol:.3g} m^3")
-            if hasattr(part, 'user_mass') and getattr(part, 'user_mass', None) is not None:
-                print(f"  Explicit mass: {part.user_mass:.3g} kg")
-            if hasattr(part, 'density'):
-                print(f"  Density: {part.density} kg/m^3")
-            print("---")
+            for i, part in enumerate(self.parts, start=1):
+                print(f"Part {part.name}:")
+                print(f"  Extents: {part.extents}")
+                vol = part._manual_volume if hasattr(part, '_manual_volume') and part._manual_volume is not None else part.volume
+                print(f"  Volume: {vol:.3g} m^3")
+                if hasattr(part, 'user_mass') and getattr(part, 'user_mass', None) is not None:
+                    print(f"  Explicit mass: {part.user_mass:.3g} kg")
+                if hasattr(part, 'density'):
+                    print(f"  Density: {part.density} kg/m^3")
+                print("---")
     
     def set_fluid_density(self, density):
         self.fluid_density = density

@@ -139,7 +139,7 @@ class PartParameterWidget(QWidget):
         self.override_volume_cb.setChecked(defaults.get('manual_volume', None) is not None)
         layout.addWidget(self.override_volume_cb, 8, 0, 1, 2)
 
-        self.override_com_cb = QCheckBox("Override COM (Only toggle if your calculating the COM for every part, otherwise leave it!)")
+        self.override_com_cb = QCheckBox("Override COM (Toggle only if computing COM per part)")
         self.override_com_cb.setChecked(defaults.get('manual_com', None) is not None)
         layout.addWidget(self.override_com_cb, 9, 0, 1, 2)
 
@@ -249,13 +249,12 @@ class MainWindow(QMainWindow):
         except Exception:
             self.history = {}
 
+        from PyQt6.QtWidgets import QScrollArea, QSplitter
         central = QWidget()
-        main_layout = QHBoxLayout()
-        central.setLayout(main_layout)
-        self.setCentralWidget(central)
-
+        # Prepare widgets for left, center, right sections
         # Left: File drag/drop and part list
-        left_layout = QVBoxLayout()
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
         self.dragdrop = DragDropWidget(self.load_files)
         left_layout.addWidget(self.dragdrop)
 
@@ -273,13 +272,9 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.remove_file_btn)
         left_layout.addLayout(btn_layout)
 
-        # Enable drag and drop on the central widget so drops anywhere are handled
-        central.setAcceptDrops(True)
-        central.dragEnterEvent = self.dragEnterEvent
-        central.dropEvent = self.dropEvent
-
         # Center: Parameter widgets for selected part
-        center_layout = QVBoxLayout()
+        center_widget = QWidget()
+        center_layout = QVBoxLayout(center_widget)
         self.param_group = QGroupBox("Part Parameters")
         self.param_layout = QVBoxLayout()
         self.param_group.setLayout(self.param_layout)
@@ -301,7 +296,8 @@ class MainWindow(QMainWindow):
         center_layout.addWidget(self.current_config_label)
 
         # Right: Solver and results
-        right_layout = QVBoxLayout()
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
 
         # --- Environment Settings group box ---
         self.env_group = QGroupBox("Environment Settings")
@@ -358,6 +354,11 @@ class MainWindow(QMainWindow):
         self.clear_cache_btn.clicked.connect(self.clear_cache_gui)
         right_layout.addWidget(self.clear_cache_btn)
 
+        # --- List Loaded Parts Button ---
+        self.list_parts_btn = QPushButton("List Loaded Parts")
+        self.list_parts_btn.clicked.connect(self.list_loaded_parts_gui)
+        right_layout.addWidget(self.list_parts_btn)
+
         # Progress bar for solver
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
@@ -365,14 +366,42 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.progress_bar)
 
         self.result_group = QGroupBox("Solver Outputs")
-        self.result_layout = QFormLayout()
-        self.result_group.setLayout(self.result_layout)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        self.result_layout = QFormLayout(scroll_content)
+        scroll_content.setLayout(self.result_layout)
+        scroll_area.setWidget(scroll_content)
+        group_layout = QVBoxLayout()
+        group_layout.addWidget(scroll_area)
+        self.result_group.setLayout(group_layout)
         right_layout.addWidget(self.result_group)
 
-        # Add layouts to main
-        main_layout.addLayout(left_layout, 2)
-        main_layout.addLayout(center_layout, 2)
-        main_layout.addLayout(right_layout, 2)
+        # --- Full Screen Output Button ---
+        self.full_screen_output_btn = QPushButton("Full Screen Output")
+        self.full_screen_output_btn.clicked.connect(self.show_solver_output_fullscreen)
+        right_layout.addWidget(self.full_screen_output_btn)
+
+        # Create QSplitter for resizable sections
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(left_widget)
+        splitter.addWidget(center_widget)
+        splitter.addWidget(right_widget)
+        # Set initial sizes (proportionally, e.g. 2:2:2)
+        splitter.setSizes([200, 200, 200])
+        # Make splitter handles more visible
+        splitter.setHandleWidth(6)  # default is 1 or 2
+        splitter.setStyleSheet("QSplitter::handle { background-color: gray; }")
+
+        # Enable drag and drop on the central widget so drops anywhere are handled
+        central.setAcceptDrops(True)
+        central.dragEnterEvent = self.dragEnterEvent
+        central.dropEvent = self.dropEvent
+        # Set splitter as the only child of central
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(splitter)
+        self.setCentralWidget(central)
 
         # --- Setup WEC model and connect environment spinboxes ---
         self.wec = WECModel()
@@ -859,6 +888,83 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Cache Clear Error", f"Failed to clear cache:\n{e}")
 
+    def list_loaded_parts_gui(self):
+        """
+        Display the list of loaded parts in the Solver Outputs box.
+        Ensures the WEC model is up-to-date with GUI parameters before listing.
+        """
+        self.result_layout.clear()
+        # If no parts are loaded, show message and return
+        if not self.parts:
+            self.append_solver_output("No parts are currently loaded.")
+            return
+        try:
+            # Ensure wec exists
+            if not hasattr(self, "wec") or self.wec is None:
+                self.wec = WECModel()
+            wec = self.wec
+            # Clear WEC model if possible
+            if hasattr(wec, "clear"):
+                wec.clear()
+            # Load all current parts with parameters into WEC model
+            for p in self.parts:
+                params = p.get("params", {})
+                wec.load_cad(
+                    p["filename"],
+                    scale=params.get("scale", 0.001),
+                    density=params.get("density", 0.0),
+                    mass=params.get("mass", 0.0),
+                    rotate=params.get("rotate", False),
+                    rotations=params.get("rotations", []),
+                    manual_volume=params.get("manual_volume", None),
+                    manual_com=params.get("manual_com", None)
+                )
+            # Capture printed output from list_parts()
+            import io
+            buf = io.StringIO()
+            import sys
+            old_stdout = sys.stdout
+            sys.stdout = buf
+            try:
+                wec.list_parts()
+            finally:
+                sys.stdout = old_stdout
+            output = buf.getvalue().strip()
+            if not output:
+                self.append_solver_output("No parts are currently loaded.")
+            else:
+                for line in output.splitlines():
+                    if line.strip():
+                        self.append_solver_output(line)
+        except Exception as e:
+            self.append_solver_output(f"Failed to display parts: {e}")
+    
+    def show_solver_output_fullscreen(self):
+        """Show all current Solver Outputs in a full screen (maximized) dialog."""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Solver Outputs - Full Screen")
+        layout = QVBoxLayout(dialog)
+        text_edit = QTextEdit(dialog)
+        text_edit.setReadOnly(True)
+        # Gather all lines from self.result_layout by iterating over all widgets
+        lines = []
+        for i in range(self.result_layout.count()):
+            item = self.result_layout.itemAt(i)
+            if item is not None:
+                widget = item.widget()
+                if widget is not None and hasattr(widget, "text"):
+                    lines.append(widget.text())
+        text_edit.setPlainText('\n'.join(lines))
+        layout.addWidget(text_edit)
+        dialog.setLayout(layout)
+        # Show maximized (if available), else full screen
+        try:
+            dialog.showMaximized()
+        except Exception:
+            dialog.showFullScreen()
+        dialog.exec()
+
 def _formlayout_clear(self):
     while self.rowCount():
         self.removeRow(0)
@@ -874,3 +980,5 @@ def main():
 if __name__ == "__main__":
     main()
     
+    
+   
