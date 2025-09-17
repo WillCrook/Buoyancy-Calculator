@@ -8,7 +8,6 @@ from scipy.optimize import brentq
 import gmsh
 from tqdm import tqdm
 
-#dummy submerged mesh class for manual volume cases
 class DummySubmerged:
     def __init__(self, volume, center_mass):
         self.volume = volume
@@ -16,11 +15,7 @@ class DummySubmerged:
 
 
 def step_to_trimesh(filepath, mesh_size_factor=0.005):
-    """
-    Convert STEP file to trimesh using Gmsh.
-    mesh_size_factor controls the resolution of meshing relative to bounding box size.
-    Implements caching to avoid recomputation.
-    """
+    """Convert STEP file to trimesh using Gmsh, with caching."""
     file_hash = f"{filepath}_{os.path.getmtime(filepath)}"
     hash_key = hashlib.sha256(file_hash.encode()).hexdigest()
     cache_dir = ".mesh_cache"
@@ -44,7 +39,6 @@ def step_to_trimesh(filepath, mesh_size_factor=0.005):
     gmsh.option.setNumber("Mesh.CharacteristicLengthMin", char_len)
     gmsh.option.setNumber("Mesh.CharacteristicLengthMax", char_len)
 
-    #computer volume using GMSH
     entities_3d = gmsh.model.getEntities(3)
     exact_volume = 0.0
     weighted_com = np.zeros(3)
@@ -55,7 +49,6 @@ def step_to_trimesh(filepath, mesh_size_factor=0.005):
         weighted_com += com * vol
     exact_com = weighted_com / exact_volume if exact_volume > 0 else np.zeros(3)
 
-    #convert STEP to mesh to visualise
     gmsh.model.mesh.generate(2)
 
     node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
@@ -77,15 +70,13 @@ def step_to_trimesh(filepath, mesh_size_factor=0.005):
     return mesh
 
 class WECModel:
-    def __init__(self, fluid_density=1000, g=9.81): #density in kg/m^3 and g field strength in m/s^2
+    def __init__(self, fluid_density=1000, g=9.81):
         self.fluid_density = fluid_density
         self.g = g
         self.parts = []
     
     def check_all_meshes_watertight(self, visualise=False):
-        """
-        Check all loaded parts for watertightness. When visualising the edges that aren't watertight they will output a red dot.
-        """
+        """Check all loaded parts for watertightness."""
         for part in self.parts:
             if part.is_watertight:
                 print(f"'{part.name}' is watertight")
@@ -107,7 +98,7 @@ class WECModel:
                     scene.show(block=False)
         
     def load_cad(self, filepath, scale=None, density=None, mass=None, rotate=False, rotations=None, manual_volume=None, manual_com=None):
-        """Loads a CAD/mesh file, uses cache for STEP files via step_to_trimesh."""
+        """Load a CAD/mesh file, with caching for STEP files."""
         if filepath.lower().endswith((".step", ".stp")):
             mesh = step_to_trimesh(filepath)
         else:
@@ -170,7 +161,7 @@ class WECModel:
         return mesh
 
     def list_parts(self):
-        """Print summary of all parts currently loaded."""
+        """Print summary of all loaded parts."""
         if self.parts == []:
             print("No Loaded Parts")
         else:
@@ -196,9 +187,7 @@ class WECModel:
     def submerged_mesh(self, mesh, waterline):
         """
         Return the submerged portion of the mesh below the waterline.
-        If the mesh has a manual volume (_manual_volume), return a dummy mesh-like object
-        with volume/center_mass attributes for buoyancy calculations, skipping boolean operations.
-        Otherwise, intersect mesh with the water box.
+        Uses manual volume if available, otherwise intersects mesh with water box.
         """
         bounds = mesh.bounds
         size_x = bounds[1][0] - bounds[0][0]
@@ -239,24 +228,20 @@ class WECModel:
             return DummySubmerged(sub_vol, cob)
         
         else:
-            # Fallback: use trimesh intersection
             water_box = trimesh.creation.box(extents=[size_x*2, size_y*2, size_z])
             water_box.apply_translation([mesh.center_mass[0], mesh.center_mass[1], bounds[0][2] + size_z/2])
             try:
                 submerged = mesh.intersection(water_box)
             except Exception:
-                # If intersection fails, return None
                 return None
             return submerged
 
     def solve_equilibrium(self):
         import pickle, hashlib
-        import traceback
         if len(self.parts) == 0:
             raise ValueError("No parts added")
 
-        # --- Caching key construction ---
-        # Gather file paths and mtimes, manual volumes/masses, fluid_density, gravity
+        # Caching key construction
         cache_items = []
         for part in self.parts:
             filename = getattr(part, "name", None)
@@ -279,20 +264,13 @@ class WECModel:
         cache_file = os.path.join(cache_dir, f"{hash_key}.pkl")
 
         # Check for cached result
-        cached_result = None
-        cache_valid = False
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "rb") as f:
-                    cached = pickle.load(f)
+                    return pickle.load(f)
             except Exception:
-                # If cache is corrupt, ignore and recalc
-                cached_result = None
-                cache_valid = False
-        if cache_valid:
-            return cached_result
+                pass
 
-        # Calculate total mass and total weight
         total_mass = 0
         for part in self.parts:
             part_mass = getattr(part, 'user_mass', None)
@@ -306,7 +284,6 @@ class WECModel:
 
         total_weight = total_mass * self.g
 
-        # Determine z bounds for root finding from all parts bounds
         min_z = min(part.bounds[0][2] for part in self.parts)
         max_z = max(part.bounds[1][2] for part in self.parts)
         range_z = max_z - min_z
@@ -353,23 +330,19 @@ class WECModel:
         else:
             waterline = brentq(total_buoyancy, z_min, z_max, xtol=1e-5)
             buoyant_message = "The object floats: it sits in the water"
-            # Calculate submerged meshes at equilibrium waterline
             submerged_parts = []
             for part in self.parts:
                 sm = self.submerged_mesh(part, waterline)
                 if sm is not None and sm.volume > 0:
                     submerged_parts.append(sm)
             if submerged_parts:
-                # Combine submerged parts into one mesh for volume and center_mass
                 try:
                     submerged = union(submerged_parts, 'blender')
                 except Exception:
-                    # fallback to first submerged part if union fails
                     submerged = submerged_parts[0]
             else:
                 submerged = None
 
-        # Calculate combined center of mass weighted by part mass
         total_mass_for_com = 0.0
         weighted_com = np.zeros(3)
         for part in self.parts:
@@ -386,30 +359,25 @@ class WECModel:
         else:
             combined_com = np.array([np.nan, np.nan, np.nan])
 
-        # For compatibility with show(), define combined as a scene of parts
         combined = trimesh.Scene(self.parts)
 
         relative_waterline = waterline - min_z
         result_tuple = (combined, waterline, relative_waterline, submerged, self._current_cob, combined_com, total_mass, buoyant_message)
-        # Save to cache (overwrite any old/corrupt cache)
         try:
             with open(cache_file, "wb") as f:
                 pickle.dump(result_tuple, f)
         except Exception:
-            # Don't let cache write errors break computation
             pass
         return result_tuple
 
     def check_stability(self, combined, waterline, relative_waterline, submerged, cob, com, mass):
-        """Estimate roll and pitch stability of the floating object, given equilibrium results."""
+        """Estimate roll and pitch stability given equilibrium results."""
         if submerged is None:
             print("Object is not floating, stability check not applicable.")
             return None, None, None, None
 
-        # Waterplane extents at waterline
         bounds = combined.bounds if hasattr(combined, 'bounds') else None
         if bounds is None:
-            # fallback: compute bounds from parts
             min_corner = np.min([p.bounds[0] for p in self.parts], axis=0)
             max_corner = np.max([p.bounds[1] for p in self.parts], axis=0)
             bounds = np.array([min_corner, max_corner])
@@ -417,17 +385,14 @@ class WECModel:
         width_x = bounds[1][0] - bounds[0][0]
         width_y = bounds[1][1] - bounds[0][1]
 
-        # Approximate second moments of area
         I_x = (width_y**3 * width_x) / 12  # roll
         I_y = (width_x**3 * width_y) / 12  # pitch
 
         V = submerged.volume
 
-        # Metacentric height approximation
         BM_x = I_x / V
         BM_y = I_y / V
 
-        # Distance from COB to COM
         BG = com[2] - cob[2]
 
         GM_x = BM_x - BG
@@ -440,13 +405,10 @@ class WECModel:
 
     def visualiser(self):
         """
-        Visualise the WEC and waterline using equilibrium waterline calculation.
-        This method only handles scene creation and showing the mesh, without printing results.
+        Visualise the WEC and waterline using equilibrium calculation.
         """
         combined, waterline, relative_waterline, submerged, cob, com, mass, buoyant_message = self.solve_equilibrium()
         
-        # Create the fluid
-        # Since combined is a Scene, get bounds from parts
         min_corner = np.min([p.bounds[0] for p in self.parts], axis=0)
         max_corner = np.max([p.bounds[1] for p in self.parts], axis=0)
         extents = max_corner - min_corner
@@ -463,13 +425,10 @@ class WECModel:
         plane.visual.face_colors = [0, 100, 255, 100]
         scene = trimesh.Scene(list(self.parts) + [plane])
         scene.set_camera(angles=(np.pi/2, 0, 0), distance=extents.max() * 5, center=center_mass)
-        # Only visualise, do not print results here.
         scene.show(block=False)
 
     def show_results(self, output_to_terminal=True):
-        """
-        Print equilibrium and stability results. This method does not modify meshes or scene data.
-        """
+        """Print equilibrium and stability results."""
         combined, waterline, relative_waterline, submerged, cob, com, mass, buoyant_message = self.solve_equilibrium()
         GM_x, GM_y, stable_roll, stable_pitch = self.check_stability(combined, waterline, relative_waterline, submerged, cob, com, mass)
         total_volume = sum([p._manual_volume if hasattr(p, '_manual_volume') and p._manual_volume is not None else p.volume for p in self.parts])
@@ -491,12 +450,8 @@ class WECModel:
             return relative_waterline, mass, overall_density, submerged.volume, cob, com, GM_x, GM_y, stable_roll, stable_pitch, buoyant_message
     
     def clear(self):
-        """
-        Reset the model's values to the initial state after __init__, except for fluid_density and gravity.
-        This clears all loaded parts and resets any cached or computed properties.
-        """
+        """Reset the model to its initial state, except for fluid_density and gravity."""
         self.parts = []
-        # Reset cached/computed properties
         if hasattr(self, 'total_mass'):
             del self.total_mass
         if hasattr(self, 'total_volume'):
@@ -519,7 +474,6 @@ if __name__ == "__main__":
     wec.set_fluid_density(1025)  # water kg/m^3
     wec.set_gravity(9.81)        # g field strength m/s^2
 
-    #Load CAD
     files = [
         ('Data/WEC STEP 2/Keel Fin.step', 0.001, 1.9, None),
         ('Data/WEC STEP 2/L Outrigger.step', 0.001, 2.4, None),
@@ -538,9 +492,7 @@ if __name__ == "__main__":
                      manual_volume=manual_volume
                      )
 
-    # Check watertightness of all meshes.
     wec.check_all_meshes_watertight(visualise=True)
 
-    # Show mesh + waterline
     wec.show_results()
     wec.visualiser()

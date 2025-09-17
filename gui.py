@@ -5,7 +5,6 @@ import json
 import io
 from contextlib import contextmanager
 
-# Set up HISTORY_FILE path to Data/Assets/history.json relative to this file
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "Data", "Assets", "history.json")
 
@@ -23,7 +22,6 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QIcon
 from main import WECModel
 
 class PartsListWidget(QListWidget):
-    """QListWidget that accepts drag-and-drop for STEP/STL files and calls a callback when files are dropped."""
     def __init__(self, file_loaded_callback):
         super().__init__()
         self.file_loaded_callback = file_loaded_callback
@@ -44,7 +42,6 @@ class PartsListWidget(QListWidget):
         event.acceptProposedAction()
 
 class DragDropWidget(QWidget):
-    """QWidget that accepts drag-and-drop for STEP/STL files."""
     def __init__(self, file_loaded_callback):
         super().__init__()
         self.file_loaded_callback = file_loaded_callback
@@ -82,43 +79,36 @@ class DragDropWidget(QWidget):
                 self.file_loaded_callback(files)
 
 class PartParameterWidget(QWidget):
-    """Widget for displaying and editing parameters for a part."""
     def __init__(self, part_name, defaults):
         super().__init__()
         self.part_name = part_name
         layout = QGridLayout()
 
-        # Scale
         layout.addWidget(QLabel("Scale (0.001 = mm → m):"), 0, 0)
         self.scale = QLineEdit()
         self.scale.setText(str(defaults.get('scale', 0.001)))
         layout.addWidget(self.scale, 0, 1)
 
-        # Mass vs Density toggle
         self.use_density_cb = QCheckBox("Use Density Instead of Mass")
         self.use_density_cb.setChecked(defaults.get('density', 0.0) > 0)
         layout.addWidget(self.use_density_cb, 1, 0, 1, 2)
 
-        # Mass
         layout.addWidget(QLabel("Mass (kg):"), 2, 0)
         self.mass = QLineEdit()
         self.mass.setText(str(defaults.get('mass', 0.0)))
         layout.addWidget(self.mass, 2, 1)
 
-        # Density
         layout.addWidget(QLabel("Density (kg/m³):"), 3, 0)
         self.density = QLineEdit()
         self.density.setText(str(defaults.get('density', 0.0)))
         layout.addWidget(self.density, 3, 1)
 
-        # Rotation toggle
         self.apply_rotations_cb = QCheckBox("Apply Rotations")
         self.apply_rotations_cb.setChecked(
             any(defaults.get(k, 0.0) != 0.0 for k in ['rot_x', 'rot_y', 'rot_z'])
         )
         layout.addWidget(self.apply_rotations_cb, 4, 0, 1, 2)
 
-        # Rotations
         layout.addWidget(QLabel("Rotation X (deg):"), 5, 0)
         self.rot_x = QLineEdit()
         self.rot_x.setText(str(defaults.get('rot_x', 0.0)))
@@ -134,7 +124,6 @@ class PartParameterWidget(QWidget):
         self.rot_z.setText(str(defaults.get('rot_z', 0.0)))
         layout.addWidget(self.rot_z, 7, 1)
 
-        # Manual override toggles: separate volume and COM
         self.override_volume_cb = QCheckBox("Override Volume")
         self.override_volume_cb.setChecked(defaults.get('manual_volume', None) is not None)
         layout.addWidget(self.override_volume_cb, 8, 0, 1, 2)
@@ -143,7 +132,6 @@ class PartParameterWidget(QWidget):
         self.override_com_cb.setChecked(defaults.get('manual_com', None) is not None)
         layout.addWidget(self.override_com_cb, 9, 0, 1, 2)
 
-        # Manual volume
         layout.addWidget(QLabel("Manual Volume (m³):"), 10, 0)
         self.manual_volume = QLineEdit()
         self.manual_volume.setText(
@@ -151,7 +139,6 @@ class PartParameterWidget(QWidget):
         )
         layout.addWidget(self.manual_volume, 10, 1)
 
-        # Manual center of mass (x,y,z)
         layout.addWidget(QLabel("Manual Center of Mass X (m):"), 11, 0)
         self.manual_com_x = QLineEdit()
         mc = defaults.get('manual_com', [0.0, 0.0, 0.0])
@@ -170,13 +157,11 @@ class PartParameterWidget(QWidget):
 
         self.setLayout(layout)
 
-        # Connect toggles to enable/disable relevant inputs
         self.use_density_cb.stateChanged.connect(self.update_mass_density_state)
         self.apply_rotations_cb.stateChanged.connect(self.update_rotation_state)
         self.override_volume_cb.stateChanged.connect(self.update_manual_volume_override_state)
         self.override_com_cb.stateChanged.connect(self.update_manual_com_override_state)
 
-        # Initialize states
         self.update_mass_density_state()
         self.update_rotation_state()
         self.update_manual_volume_override_state()
@@ -299,11 +284,9 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
 
-        # --- Environment Settings group box ---
         self.env_group = QGroupBox("Environment Settings")
         env_layout = QGridLayout()
 
-        # Try to get default values from self.wec if available, else use fallback
         try:
             wec_temp = WECModel()
             fluid_density_default = getattr(wec_temp, "fluid_density", 1025)
@@ -312,7 +295,6 @@ class MainWindow(QMainWindow):
             fluid_density_default = 1025
             gravity_default = 9.81
 
-        # Fluid Density
         env_layout.addWidget(QLabel("Fluid Density (kg/m³):"), 0, 0)
         self.fluid_density_spin = QDoubleSpinBox()
         self.fluid_density_spin.setRange(0, 2000)
@@ -321,7 +303,6 @@ class MainWindow(QMainWindow):
         self.fluid_density_spin.setValue(fluid_density_default)
         env_layout.addWidget(self.fluid_density_spin, 0, 1)
 
-        # Gravity
         env_layout.addWidget(QLabel("Gravity (m/s²):"), 1, 0)
         self.gravity_spin = QDoubleSpinBox()
         self.gravity_spin.setRange(0, 20)
@@ -333,7 +314,6 @@ class MainWindow(QMainWindow):
         self.env_group.setLayout(env_layout)
         right_layout.addWidget(self.env_group)
 
-        # Watertight check buttons
         self.watertight_no_vis_btn = QPushButton("Check CAD Models are Watertight")
         self.watertight_no_vis_btn.clicked.connect(self.check_watertight_no_vis)
         right_layout.addWidget(self.watertight_no_vis_btn)
@@ -359,7 +339,6 @@ class MainWindow(QMainWindow):
         self.list_parts_btn.clicked.connect(self.list_loaded_parts_gui)
         right_layout.addWidget(self.list_parts_btn)
 
-        # Progress bar for solver
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setValue(0)
@@ -377,45 +356,34 @@ class MainWindow(QMainWindow):
         self.result_group.setLayout(group_layout)
         right_layout.addWidget(self.result_group)
 
-        # --- Full Screen Output Button ---
         self.full_screen_output_btn = QPushButton("Full Screen Output")
         self.full_screen_output_btn.clicked.connect(self.show_solver_output_fullscreen)
         right_layout.addWidget(self.full_screen_output_btn)
 
-        # Create QSplitter for resizable sections
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_widget)
         splitter.addWidget(center_widget)
         splitter.addWidget(right_widget)
-        # Set initial sizes (proportionally, e.g. 2:2:2)
         splitter.setSizes([200, 200, 200])
-        # Make splitter handles more visible
         splitter.setHandleWidth(6)  # default is 1 or 2
         splitter.setStyleSheet("QSplitter::handle { background-color: gray; }")
 
-        # Enable drag and drop on the central widget so drops anywhere are handled
         central.setAcceptDrops(True)
         central.dragEnterEvent = self.dragEnterEvent
         central.dropEvent = self.dropEvent
-        # Set splitter as the only child of central
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(splitter)
         self.setCentralWidget(central)
 
-        # --- Setup WEC model and connect environment spinboxes ---
         self.wec = WECModel()
-        # Set initial values in WEC model
         self.wec.set_fluid_density(self.fluid_density_spin.value())
         self.wec.set_gravity(self.gravity_spin.value())
-        # Connect signals to update WEC model immediately
         self.fluid_density_spin.valueChanged.connect(lambda v: self.wec.set_fluid_density(v))
         self.gravity_spin.valueChanged.connect(lambda v: self.wec.set_gravity(v))
 
-        # Connections
         self.parts_list.currentItemChanged.connect(self.update_param_widget)
 
-        # Initialize
         self.update_param_widget()
 
     def save_config(self):
@@ -593,10 +561,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _collect_supported_files(paths):
-        """
-        Given a list of file/folder paths, collect all supported files (.stl, .step, .stp).
-        If a folder is given, add all supported files in that folder (non-recursive).
-        """
         supported_exts = ('.stl', '.step', '.stp')
         files = []
         for path in paths:
@@ -610,7 +574,6 @@ class MainWindow(QMainWindow):
         return files
 
     def dragEnterEvent(self, event: QDragEnterEvent):
-        # Accept drag if any file/folder with supported extension or is a directory
         if event.mimeData().hasUrls() and any(
             url.toLocalFile().lower().endswith(('.stl', '.step', '.stp')) or os.path.isdir(url.toLocalFile())
             for url in event.mimeData().urls()
@@ -699,12 +662,8 @@ class MainWindow(QMainWindow):
                                p['params'].get('manual_com', None)))
         try:
             wec = self.wec
-            # Clear the WEC model to prevent accumulation of mass/parts
             if hasattr(wec, "clear"):
                 wec.clear()
-            else:
-                # If WECModel does not have a clear method, it should be implemented to reset its state.
-                pass
             self.progress_bar.setMaximum(len(param_list))
             self.progress_bar.setValue(0)
             for i, (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in enumerate(param_list):
@@ -719,16 +678,12 @@ class MainWindow(QMainWindow):
                     manual_com=manual_com
                 )
                 self.progress_bar.setValue(i+1)
-            # Clear previous outputs
             self.result_layout.clear()
-            # Redirect stdout to GUI and call show_results with output_to_terminal=True
             with self.redirect_stdout_to_gui():
                 wec.show_results(output_to_terminal=True)
         except Exception as e:
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Solver Error", f"{e}\n{tb}")
-        except:
-            pass
         
     def launch_viewer(self):
         self.collect_parameters()
@@ -860,14 +815,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Watertight Check Error", f"{e}\n{tb}")
 
     def append_solver_output(self, text):
-        """Append a message to the Solver Outputs box (result_layout) as a new row."""
-        # Show each message as a new label row
         label = QLabel(str(text))
         self.result_layout.addRow(label)
 
     @contextmanager
     def redirect_stdout_to_gui(self):
-        """Context manager to capture stdout and append to Solver Outputs box."""
         buffer = io.StringIO()
         old_stdout = sys.stdout
         sys.stdout = buffer
@@ -881,7 +833,6 @@ class MainWindow(QMainWindow):
                     self.append_solver_output(line)
     
     def clear_cache_gui(self):
-        """Clear the WECModel cache and show confirmation."""
         try:
             self.wec.clear_cache()
             QMessageBox.information(self, "Cache Cleared", "The cache has been cleared successfully.")
@@ -889,24 +840,16 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Cache Clear Error", f"Failed to clear cache:\n{e}")
 
     def list_loaded_parts_gui(self):
-        """
-        Display the list of loaded parts in the Solver Outputs box.
-        Ensures the WEC model is up-to-date with GUI parameters before listing.
-        """
         self.result_layout.clear()
-        # If no parts are loaded, show message and return
         if not self.parts:
             self.append_solver_output("No parts are currently loaded.")
             return
         try:
-            # Ensure wec exists
             if not hasattr(self, "wec") or self.wec is None:
                 self.wec = WECModel()
             wec = self.wec
-            # Clear WEC model if possible
             if hasattr(wec, "clear"):
                 wec.clear()
-            # Load all current parts with parameters into WEC model
             for p in self.parts:
                 params = p.get("params", {})
                 wec.load_cad(
@@ -919,7 +862,6 @@ class MainWindow(QMainWindow):
                     manual_volume=params.get("manual_volume", None),
                     manual_com=params.get("manual_com", None)
                 )
-            # Capture printed output from list_parts()
             import io
             buf = io.StringIO()
             import sys
@@ -940,14 +882,12 @@ class MainWindow(QMainWindow):
             self.append_solver_output(f"Failed to display parts: {e}")
     
     def show_solver_output_fullscreen(self):
-        """Show all current Solver Outputs in a full screen (maximized) dialog."""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit
         dialog = QDialog(self)
         dialog.setWindowTitle("Solver Outputs - Full Screen")
         layout = QVBoxLayout(dialog)
         text_edit = QTextEdit(dialog)
         text_edit.setReadOnly(True)
-        # Gather all lines from self.result_layout by iterating over all widgets
         lines = []
         for i in range(self.result_layout.count()):
             item = self.result_layout.itemAt(i)
@@ -958,7 +898,6 @@ class MainWindow(QMainWindow):
         text_edit.setPlainText('\n'.join(lines))
         layout.addWidget(text_edit)
         dialog.setLayout(layout)
-        # Show maximized (if available), else full screen
         try:
             dialog.showMaximized()
         except Exception:
@@ -979,6 +918,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-    
-   
