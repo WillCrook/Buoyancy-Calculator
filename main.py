@@ -44,7 +44,7 @@ def step_to_trimesh(filepath, mesh_size_factor=0.005):
     gmsh.option.setNumber("Mesh.CharacteristicLengthMin", char_len)
     gmsh.option.setNumber("Mesh.CharacteristicLengthMax", char_len)
 
-    # ---- Compute exact volume & centroid via OCC (no 3D mesh needed) ----
+    #computer volume using GMSH
     entities_3d = gmsh.model.getEntities(3)
     exact_volume = 0.0
     weighted_com = np.zeros(3)
@@ -55,10 +55,9 @@ def step_to_trimesh(filepath, mesh_size_factor=0.005):
         weighted_com += com * vol
     exact_com = weighted_com / exact_volume if exact_volume > 0 else np.zeros(3)
 
-    # ---- Generate 2D surface mesh for visualisation ----
-    gmsh.model.mesh.generate(2)
+    #convert STEP to mesh to visualise
+    gmsh.model.mesh.generate(3)
 
-    # ---- Extract surface mesh for visualization ----
     node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
     nodes = np.array(node_coords).reshape(-1, 3)
 
@@ -92,7 +91,7 @@ class WECModel:
                 print(f"Mesh '{part.name}' is watertight")
             else:
                 open_facets = part.facets_boundary
-                print(f"Mesh '{part.name}' is NOT watertight")
+                print(f"'{part.name}' is NOT watertight")
                 print(f"  Number of open facets: {len(open_facets)}")
 
                 if visualise:
@@ -105,7 +104,7 @@ class WECModel:
                     points.visual.vertex_colors = [255, 0, 0, 255]  #red
                     scene.add_geometry(points)
                     
-                    scene.show()
+                    scene.show(block=False)
         
     def load_cad(self, filepath, scale=None, density=None, mass=None, rotate=False, rotations=None, manual_volume=None, manual_com=None):
         """Loads a CAD/mesh file, uses cache for STEP files via step_to_trimesh."""
@@ -114,7 +113,7 @@ class WECModel:
         else:
             mesh = trimesh.load(filepath)
         mesh.apply_scale(scale)
-        mesh.name = filepath
+        mesh.name = os.path.basename(filepath)
 
         if rotate and rotations is not None:
             center = mesh.center_mass
@@ -452,7 +451,7 @@ class WECModel:
         scene = trimesh.Scene(list(self.parts) + [plane])
         scene.set_camera(angles=(np.pi/2, 0, 0), distance=extents.max() * 5, center=center_mass)
         # Only visualise, do not print results here.
-        scene.show()
+        scene.show(block=False)
 
     def show_results(self, output_to_terminal=True):
         """
@@ -485,11 +484,11 @@ if __name__ == "__main__":
 
     #Load CAD
     files = [
-        ('Data/WEC STEP/Keel_1.step', 0.001, 1.9, None),
-        ('Data/WEC STEP/Left_Outrigger.step', 0.001, 2.4, None),
-        ('Data/WEC STEP/Right_outrigger_1.step', 0.001, 2.4, None),
-        ('Data/WEC STEP/Keel_Weight_1.step', 0.001, 4.5, None),
-        ('Data/WEC STEP/Body_1.step', 0.001, 7.5, 0.0314),  # with electronics
+        ('Data/WEC STEP 2/Keel Fin.step', 0.001, 1.9, None),
+        ('Data/WEC STEP 2/L Outrigger.step', 0.001, 2.4, None),
+        ('Data/WEC STEP 2/R Outrigger.step', 0.001, 2.4, None),
+        ('Data/WEC STEP 2/Keel Weight.step', 0.001, 4.5, None),
+        ('Data/WEC STEP 2/Hull.step', 0.001, 7, 0.03602),  # with electronics
     ]
 
     for path, scale, mass, manual_volume in tqdm(files, desc="Loading CAD files"):
@@ -503,9 +502,8 @@ if __name__ == "__main__":
                      )
 
     # Check watertightness of all meshes.
-    # wec.check_all_meshes_watertight(visualise=True)
+    wec.check_all_meshes_watertight(visualise=True)
 
     # Show mesh + waterline
     wec.show_results()
     wec.visualiser()
-    

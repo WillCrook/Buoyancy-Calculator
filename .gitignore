@@ -4,3 +4,4 @@
 *__pycache__
 *.equilibrium_cache
 *.mesh_cache
+*.step

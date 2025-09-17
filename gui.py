@@ -287,6 +287,49 @@ class MainWindow(QMainWindow):
 
         # Right: Solver and results
         right_layout = QVBoxLayout()
+
+        # --- Environment Settings group box ---
+        self.env_group = QGroupBox("Environment Settings")
+        env_layout = QGridLayout()
+
+        # Try to get default values from self.wec if available, else use fallback
+        try:
+            wec_temp = WECModel()
+            fluid_density_default = getattr(wec_temp, "fluid_density", 1025)
+            gravity_default = getattr(wec_temp, "g", 9.81)
+        except Exception:
+            fluid_density_default = 1025
+            gravity_default = 9.81
+
+        # Fluid Density
+        env_layout.addWidget(QLabel("Fluid Density (kg/m³):"), 0, 0)
+        self.fluid_density_spin = QDoubleSpinBox()
+        self.fluid_density_spin.setRange(0, 2000)
+        self.fluid_density_spin.setDecimals(1)
+        self.fluid_density_spin.setSingleStep(1)
+        self.fluid_density_spin.setValue(fluid_density_default)
+        env_layout.addWidget(self.fluid_density_spin, 0, 1)
+
+        # Gravity
+        env_layout.addWidget(QLabel("Gravity (m/s²):"), 1, 0)
+        self.gravity_spin = QDoubleSpinBox()
+        self.gravity_spin.setRange(0, 20)
+        self.gravity_spin.setDecimals(3)
+        self.gravity_spin.setSingleStep(0.01)
+        self.gravity_spin.setValue(gravity_default)
+        env_layout.addWidget(self.gravity_spin, 1, 1)
+
+        self.env_group.setLayout(env_layout)
+        right_layout.addWidget(self.env_group)
+
+        # Add Watertight check buttons at the top of right panel
+        self.watertight_no_vis_btn = QPushButton("Check CAD Models are Watertight")
+        self.watertight_no_vis_btn.clicked.connect(self.check_watertight_no_vis)
+        right_layout.addWidget(self.watertight_no_vis_btn)
+        self.watertight_vis_btn = QPushButton("Show Open Facets")
+        self.watertight_vis_btn.clicked.connect(self.check_watertight_vis)
+        right_layout.addWidget(self.watertight_vis_btn)
+
         self.solve_btn = QPushButton("Run Equilibrium Solver")
         self.solve_btn.clicked.connect(self.run_solver)
         right_layout.addWidget(self.solve_btn)
@@ -312,6 +355,15 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(center_layout, 2)
         main_layout.addLayout(right_layout, 2)
 
+        # --- Setup WEC model and connect environment spinboxes ---
+        self.wec = WECModel()
+        # Set initial values in WEC model
+        self.wec.set_fluid_density(self.fluid_density_spin.value())
+        self.wec.set_gravity(self.gravity_spin.value())
+        # Connect signals to update WEC model immediately
+        self.fluid_density_spin.valueChanged.connect(lambda v: self.wec.set_fluid_density(v))
+        self.gravity_spin.valueChanged.connect(lambda v: self.wec.set_gravity(v))
+
         # Connections
         self.parts_list.currentItemChanged.connect(self.update_param_widget)
 
@@ -335,10 +387,71 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Save Config Error", str(e))
 
     def load_config(self):
-        # Open open file dialog
+        # Show menu of recent configs and "Other File..." option
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction
+        menu = QMenu(self)
+        # Get recent configs from history
+        recent_configs = self.history.get("recent_configs", [])
+        # Only keep files that still exist
+        recent_configs = [f for f in recent_configs if os.path.isfile(f)]
+        # Show up to 5 most recent
+        shown_configs = recent_configs[:5]
+        actions = []
+        for path in shown_configs:
+            act = QAction(os.path.basename(path), self)
+            act.setToolTip(path)
+            actions.append((act, path))
+            menu.addAction(act)
+        if shown_configs:
+            menu.addSeparator()
+        other_action = QAction("Other File...", self)
+        menu.addAction(other_action)
+        # Popup menu under the button
+        pos = self.load_config_btn.mapToGlobal(self.load_config_btn.rect().bottomLeft())
+        chosen_action = menu.exec(pos)
+        if chosen_action is None:
+            return
+        chosen_path = None
+        for act, path in actions:
+            if chosen_action == act:
+                chosen_path = path
+                break
+        if chosen_action == other_action:
+            chosen_path = self.open_config_file_dialog()
+        if not chosen_path:
+            return
+        self.load_config_file(chosen_path)
+
+    def save_recent_config(self, path):
+        """Save the config file path to recent configs history."""
+        if not path:
+            return
+        # Load existing recent configs from history
+        recent = self.history.get("recent_configs", [])
+        # Remove if already present, then insert at front
+        if path in recent:
+            recent.remove(path)
+        recent.insert(0, path)
+        # Keep only 10 most recent
+        recent = recent[:10]
+        self.history["recent_configs"] = recent
+        # Save to disk
+        try:
+            with open("history.json", "w") as f:
+                json.dump(self.history, f, indent=2)
+        except Exception:
+            pass
+
+    def open_config_file_dialog(self):
+        """Show file open dialog for config JSON, return path or None."""
         filename, _ = QFileDialog.getOpenFileName(
             self, "Load Configuration", "", "JSON Files (*.json);;All Files (*)"
         )
+        return filename if filename else None
+
+    def load_config_file(self, filename):
+        """Load config from the given file, update recent configs."""
         if not filename:
             return
         # Load JSON into list of parts
@@ -356,18 +469,20 @@ class MainWindow(QMainWindow):
         self.parts_list.clear()
         # Recreate parts and widgets
         for part in loaded_parts:
-            filename = part.get('filename')
+            part_filename = part.get('filename')
             params = part.get('params', {})
-            self.parts.append({'filename': filename, 'params': params})
-            item = QListWidgetItem(os.path.basename(filename))
-            item.setData(Qt.ItemDataRole.UserRole, filename)
+            self.parts.append({'filename': part_filename, 'params': params})
+            item = QListWidgetItem(os.path.basename(part_filename))
+            item.setData(Qt.ItemDataRole.UserRole, part_filename)
             self.parts_list.addItem(item)
-            self.part_widgets[filename] = PartParameterWidget(
-                os.path.basename(filename), params
+            self.part_widgets[part_filename] = PartParameterWidget(
+                os.path.basename(part_filename), params
             )
         if self.parts:
             self.parts_list.setCurrentRow(0)
         self.update_param_widget()
+        # Save to recent configs
+        self.save_recent_config(filename)
 
     @staticmethod
     def _collect_supported_files(paths):
@@ -474,7 +589,7 @@ class MainWindow(QMainWindow):
                                p['params'].get('manual_volume', None),
                                p['params'].get('manual_com', None)))
         try:
-            wec = WECModel()
+            wec = self.wec
             self.progress_bar.setMaximum(len(param_list))
             self.progress_bar.setValue(0)
             for i, (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in enumerate(param_list):
@@ -547,7 +662,7 @@ class MainWindow(QMainWindow):
                                p['params'].get('manual_volume', None),
                                p['params'].get('manual_com', None)))
         try:
-            wec = WECModel()
+            wec = self.wec
             for (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in param_list:
                 wec.load_cad(
                     filepath,
@@ -590,6 +705,99 @@ class MainWindow(QMainWindow):
         self.parts_list.takeItem(row)
         # Update parameter widget display
         self.update_param_widget()
+
+    def check_watertight_no_vis(self):
+        self.collect_parameters()
+        param_list = []
+        for p in self.parts:
+            param_list.append((p['filename'],
+                               p['params'].get('scale', 0.001),
+                               p['params'].get('mass', 0.0),
+                               p['params'].get('density', 0.0),
+                               p['params'].get('rotate', False),
+                               p['params'].get('rotations', []),
+                               p['params'].get('manual_volume', None),
+                               p['params'].get('manual_com', None)))
+        try:
+            wec = self.wec
+            for (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in param_list:
+                wec.load_cad(
+                    filepath,
+                    scale=scale,
+                    density=density,
+                    mass=mass,
+                    rotate=rotate,
+                    rotations=rotations,
+                    manual_volume=manual_volume,
+                    manual_com=manual_com
+                )
+            # Clear previous outputs
+            self.result_layout.clear()
+            # Redirect stdout to GUI and call watertight check
+            with self.redirect_stdout_to_gui():
+                wec.check_all_meshes_watertight(visualise=False)
+        except Exception as e:
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Watertight Check Error", f"{e}\n{tb}")
+
+    def check_watertight_vis(self):
+        self.collect_parameters()
+        param_list = []
+        for p in self.parts:
+            param_list.append((p['filename'],
+                               p['params'].get('scale', 0.001),
+                               p['params'].get('mass', 0.0),
+                               p['params'].get('density', 0.0),
+                               p['params'].get('rotate', False),
+                               p['params'].get('rotations', []),
+                               p['params'].get('manual_volume', None),
+                               p['params'].get('manual_com', None)))
+        try:
+            wec = self.wec
+            for (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in param_list:
+                wec.load_cad(
+                    filepath,
+                    scale=scale,
+                    density=density,
+                    mass=mass,
+                    rotate=rotate,
+                    rotations=rotations,
+                    manual_volume=manual_volume,
+                    manual_com=manual_com
+                )
+            # Clear previous outputs
+            self.result_layout.clear()
+            # Redirect stdout to GUI and call watertight check
+            with self.redirect_stdout_to_gui():
+                wec.check_all_meshes_watertight(visualise=True)
+        except Exception as e:
+            tb = traceback.format_exc()
+            QMessageBox.critical(self, "Watertight Check Error", f"{e}\n{tb}")
+
+    def append_solver_output(self, text):
+        """Append a message to the Solver Outputs box (result_layout) as a new row."""
+        # Show each message as a new label row
+        label = QLabel(str(text))
+        self.result_layout.addRow(label)
+
+    from contextlib import contextmanager
+    import io
+    @contextmanager
+    def redirect_stdout_to_gui(self):
+        """Context manager to capture stdout and append to Solver Outputs box."""
+        import sys
+        buffer = self.io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = buffer
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            # Split into lines and append each to solver output
+            buffer.seek(0)
+            for line in buffer.read().splitlines():
+                if line.strip():
+                    self.append_solver_output(line)
 
 # Add clear method to QFormLayout if missing
 def _formlayout_clear(self):
