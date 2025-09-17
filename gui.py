@@ -4,6 +4,10 @@ import traceback
 import json
 import io
 from contextlib import contextmanager
+import ctypes
+
+myappid = "BuoyancyCalculator.Fetch.1.0"  # Arbitrary but unique string
+ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "Data", "Assets", "history.json")
