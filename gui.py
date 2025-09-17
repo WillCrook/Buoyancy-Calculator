@@ -5,6 +5,10 @@ import json
 import io
 from contextlib import contextmanager
 
+# Set up HISTORY_FILE path to Data/Assets/history.json relative to this file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+HISTORY_FILE = os.path.join(BASE_DIR, "Data", "Assets", "history.json")
+
 # Third-party imports
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -13,7 +17,7 @@ from PyQt6.QtWidgets import (
     QSpinBox, QGroupBox, QGridLayout, QMessageBox, QCheckBox, QProgressBar
 )
 from PyQt6.QtCore import Qt, QMimeData
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QIcon
 
 # Local imports
 from main import WECModel
@@ -234,10 +238,13 @@ class MainWindow(QMainWindow):
         self.part_widgets = {}  # filename -> PartParameterWidget
         self.history = {}
         self.current_config_file = None  # Track current config file
+        icon_path = os.path.join(BASE_DIR, "Data", "Fetch", "fetch.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # Load history json if exists
         try:
-            with open("history.json", "r") as f:
+            with open(HISTORY_FILE, "r") as f:
                 self.history = json.load(f)
         except Exception:
             self.history = {}
@@ -475,7 +482,7 @@ class MainWindow(QMainWindow):
         self.history["recent_configs"] = recent
         # Save to disk
         try:
-            with open("history.json", "w") as f:
+            with open(HISTORY_FILE, "w") as f:
                 json.dump(self.history, f, indent=2)
         except Exception:
             pass
