@@ -3,8 +3,22 @@ import os
 import traceback
 import json
 import io
-from contextlib import contextmanager
 import ctypes
+from contextlib import contextmanager
+
+# PyQt6 imports
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QListWidget, QListWidgetItem,
+    QLineEdit, QFileDialog, QAbstractItemView, QFormLayout, QDoubleSpinBox,
+    QSpinBox, QGroupBox, QGridLayout, QMessageBox, QCheckBox, QProgressBar,
+    QScrollArea, QSplitter
+)
+from PyQt6.QtCore import Qt, QMimeData
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QIcon
+
+# Local imports
+from main import WECModel
 
 # Determine a writable directory for history.json
 if os.name == "nt":
@@ -246,7 +260,6 @@ class MainWindow(QMainWindow):
         except Exception:
             self.history = {}
 
-        from PyQt6.QtWidgets import QScrollArea, QSplitter
         central = QWidget()
         # Prepare widgets for left, center, right sections
         # Left: File drag/drop and part list
@@ -857,9 +870,11 @@ class MainWindow(QMainWindow):
             self.append_solver_output("No parts are currently loaded.")
             return
         try:
-            if not hasattr(self, "wec") or self.wec is None:
-                self.wec = WECModel()
-            wec = self.wec
+            # Ensure WECModel and any icon loading happen after QApplication is running
+            wec = getattr(self, "wec", None)
+            if wec is None:
+                wec = WECModel()
+                self.wec = wec
             if hasattr(wec, "clear"):
                 wec.clear()
             for p in self.parts:
@@ -874,9 +889,8 @@ class MainWindow(QMainWindow):
                     manual_volume=params.get("manual_volume", None),
                     manual_com=params.get("manual_com", None)
                 )
-            import io
+            # Redirect stdout to GUI
             buf = io.StringIO()
-            import sys
             old_stdout = sys.stdout
             sys.stdout = buf
             try:
