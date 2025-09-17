@@ -56,7 +56,7 @@ def step_to_trimesh(filepath, mesh_size_factor=0.005):
     exact_com = weighted_com / exact_volume if exact_volume > 0 else np.zeros(3)
 
     #convert STEP to mesh to visualise
-    gmsh.model.mesh.generate(3)
+    gmsh.model.mesh.generate(2)
 
     node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
     nodes = np.array(node_coords).reshape(-1, 3)
