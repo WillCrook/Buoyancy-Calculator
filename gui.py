@@ -6,9 +6,6 @@ import io
 from contextlib import contextmanager
 import ctypes
 
-myappid = "BuoyancyCalculator.Fetch.1.0"  # Arbitrary but unique string
-ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "Data", "Assets", "history.json")
 
@@ -920,9 +917,20 @@ if not hasattr(QFormLayout, "clear"):
     QFormLayout.clear = _formlayout_clear
 
 def main():
+    if os.name == "nt":
+        myappid = "BuoyancyCalculator.Fetch.1.0"
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
     app = QApplication(sys.argv)
+
+    # Load and set the icon globally
+    icon = QIcon(resource_path(os.path.join("Data", "Assets", "fetch.ico")))
+    app.setWindowIcon(icon)
+
     window = MainWindow()
+    window.setWindowIcon(icon)  # also set explicitly on the main window
     window.show()
+
     sys.exit(app.exec())
 
 if __name__ == "__main__":
