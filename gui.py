@@ -6,8 +6,14 @@ import io
 from contextlib import contextmanager
 import ctypes
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HISTORY_FILE = os.path.join(BASE_DIR, "Data", "Assets", "history.json")
+# Determine a writable directory for history.json
+if os.name == "nt":
+    history_dir = os.path.join(os.environ["APPDATA"], "BuoyancyCalculator")
+else:
+    history_dir = os.path.expanduser("~/.buoyancy_calculator")
+
+os.makedirs(history_dir, exist_ok=True)
+HISTORY_FILE = os.path.join(history_dir, "history.json")
 
 # Helper for resource paths (PyInstaller-friendly)
 def resource_path(relative_path):
@@ -928,7 +934,7 @@ def main():
     app.setWindowIcon(icon)
 
     window = MainWindow()
-    window.setWindowIcon(icon)  # also set explicitly on the main window
+    window.setWindowIcon(icon) 
     window.show()
 
     sys.exit(app.exec())
