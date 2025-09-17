@@ -231,6 +231,7 @@ class MainWindow(QMainWindow):
         self.parts = []  # List of dicts: {'filename':..., 'volume':..., 'params':..., ...}
         self.part_widgets = {}  # filename -> PartParameterWidget
         self.history = {}
+        self.current_config_file = None  # Track current config file
 
         # Load history json if exists
         try:
@@ -284,6 +285,11 @@ class MainWindow(QMainWindow):
         self.load_config_btn.clicked.connect(self.load_config)
         config_btn_layout.addWidget(self.load_config_btn)
         center_layout.addLayout(config_btn_layout)
+
+        # Add: Config file label below Save/Load Config buttons
+        self.current_config_label = QLabel("No config loaded")
+        self.current_config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        center_layout.addWidget(self.current_config_label)
 
         # Right: Solver and results
         right_layout = QVBoxLayout()
@@ -373,13 +379,6 @@ class MainWindow(QMainWindow):
     def save_config(self):
         # Gather parameters
         self.collect_parameters()
-        # Open save file dialog
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Save Configuration", "", "JSON Files (*.json);;All Files (*)"
-        )
-        if not filename:
-            return
-        # Save both parts and environment settings
         config = {
             "parts": self.parts,
             "environment": {
@@ -387,9 +386,39 @@ class MainWindow(QMainWindow):
                 "gravity": self.gravity_spin.value()
             }
         }
+        # If a config file is loaded, prompt to overwrite or save as new
+        filename = None
+        if self.current_config_file is not None:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Question)
+            msg.setWindowTitle("Save Configuration")
+            msg.setText(f"Do you want to overwrite the current config file?\n\n{self.current_config_file}")
+            overwrite_btn = msg.addButton("Overwrite", QMessageBox.ButtonRole.YesRole)
+            saveas_btn = msg.addButton("Save As New...", QMessageBox.ButtonRole.NoRole)
+            cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            msg.setDefaultButton(overwrite_btn)
+            msg.exec()
+            clicked = msg.clickedButton()
+            if clicked == overwrite_btn:
+                filename = self.current_config_file
+            elif clicked == saveas_btn:
+                filename, _ = QFileDialog.getSaveFileName(
+                    self, "Save Configuration", "", "JSON Files (*.json);;All Files (*)"
+                )
+            else:
+                return
+        else:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Save Configuration", "", "JSON Files (*.json);;All Files (*)"
+            )
+        if not filename:
+            return
         try:
             with open(filename, "w") as f:
                 json.dump(config, f, indent=2)
+            self.current_config_file = filename
+            self.update_current_config_label()
+            self.save_recent_config(filename)
         except Exception as e:
             QMessageBox.critical(self, "Save Config Error", str(e))
 
@@ -458,7 +487,7 @@ class MainWindow(QMainWindow):
         return filename if filename else None
 
     def load_config_file(self, filename):
-        """Load config from the given file, update recent configs."""
+        """Load config from the given file, update recent configs and current config label."""
         if not filename:
             return
         # Load JSON and handle both legacy (list of parts) and new (dict with parts & environment)
@@ -507,6 +536,18 @@ class MainWindow(QMainWindow):
                 self.wec.set_gravity(gravity)
         # Save to recent configs
         self.save_recent_config(filename)
+        # Track current config file and update label
+        self.current_config_file = filename
+        self.update_current_config_label()
+
+    def update_current_config_label(self):
+        """Update the label showing the current loaded config file."""
+        if self.current_config_file is None:
+            self.current_config_label.setText("No config loaded")
+        else:
+            self.current_config_label.setText(
+                f"Config: {os.path.basename(self.current_config_file)}"
+            )
 
     @staticmethod
     def _collect_supported_files(paths):
