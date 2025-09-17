@@ -353,6 +353,11 @@ class MainWindow(QMainWindow):
         self.visualize_btn.clicked.connect(self.launch_viewer)
         right_layout.addWidget(self.visualize_btn)
 
+        # --- Clear Cache Button ---
+        self.clear_cache_btn = QPushButton("Clear Cache")
+        self.clear_cache_btn.clicked.connect(self.clear_cache_gui)
+        right_layout.addWidget(self.clear_cache_btn)
+
         # Progress bar for solver
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
@@ -845,6 +850,14 @@ class MainWindow(QMainWindow):
             for line in buffer.read().splitlines():
                 if line.strip():
                     self.append_solver_output(line)
+    
+    def clear_cache_gui(self):
+        """Clear the WECModel cache and show confirmation."""
+        try:
+            self.wec.clear_cache()
+            QMessageBox.information(self, "Cache Cleared", "The cache has been cleared successfully.")
+        except Exception as e:
+            QMessageBox.critical(self, "Cache Clear Error", f"Failed to clear cache:\n{e}")
 
 def _formlayout_clear(self):
     while self.rowCount():
@@ -860,3 +873,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    

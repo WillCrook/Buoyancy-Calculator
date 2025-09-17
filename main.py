@@ -501,6 +501,16 @@ class WECModel:
         if hasattr(self, '_current_cob'):
             del self._current_cob
 
+    def clear_cache(self):
+        """Delete all cached mesh and equilibrium files."""
+        import shutil
+        for cache_dir in [".mesh_cache", ".equilibrium_cache"]:
+            if os.path.exists(cache_dir):
+                try:
+                    shutil.rmtree(cache_dir)
+                except Exception as e:
+                    print(f"Failed to clear cache directory {cache_dir}: {e}")
+
 if __name__ == "__main__":
     wec = WECModel()
     wec.set_fluid_density(1025)  # water kg/m^3
