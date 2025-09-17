@@ -754,6 +754,10 @@ class MainWindow(QMainWindow):
         self.update_param_widget()
 
     def check_watertight_no_vis(self):
+        # Clear previous outputs at the very start and reset WEC model state
+        self.result_layout.clear()
+        if hasattr(self.wec, "clear"):
+            self.wec.clear()
         self.collect_parameters()
         param_list = []
         for p in self.parts:
@@ -778,8 +782,6 @@ class MainWindow(QMainWindow):
                     manual_volume=manual_volume,
                     manual_com=manual_com
                 )
-            # Clear previous outputs
-            self.result_layout.clear()
             # Redirect stdout to GUI and call watertight check
             with self.redirect_stdout_to_gui():
                 wec.check_all_meshes_watertight(visualise=False)
@@ -788,6 +790,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Watertight Check Error", f"{e}\n{tb}")
 
     def check_watertight_vis(self):
+        # Clear previous outputs at the very start and reset WEC model state
+        self.result_layout.clear()
+        if hasattr(self.wec, "clear"):
+            self.wec.clear()
         self.collect_parameters()
         param_list = []
         for p in self.parts:
@@ -812,8 +818,6 @@ class MainWindow(QMainWindow):
                     manual_volume=manual_volume,
                     manual_com=manual_com
                 )
-            # Clear previous outputs
-            self.result_layout.clear()
             # Redirect stdout to GUI and call watertight check
             with self.redirect_stdout_to_gui():
                 wec.check_all_meshes_watertight(visualise=True)
