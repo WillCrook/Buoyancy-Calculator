@@ -248,21 +248,25 @@ class WECModel:
 
     def solve_equilibrium(self):
         import pickle, hashlib
+        import traceback
         if len(self.parts) == 0:
             raise ValueError("No parts added")
 
         # --- Caching key construction ---
-        # Gather filenames, mtimes, manual volumes/masses, fluid_density, gravity
+        # Gather file paths and mtimes, manual volumes/masses, fluid_density, gravity
         cache_items = []
         for part in self.parts:
             filename = getattr(part, "name", None)
+            # Try to get absolute path for uniqueness, but fallback to name
             if filename is not None and os.path.isfile(filename):
-                mtime = os.path.getmtime(filename)
+                abs_path = os.path.abspath(filename)
+                mtime = os.path.getmtime(abs_path)
             else:
+                abs_path = filename if filename is not None else "nofile"
                 mtime = "nofile"
             manual_volume = getattr(part, "_manual_volume", None)
             user_mass = getattr(part, "user_mass", None)
-            cache_items.append(f"{filename}|{mtime}|{manual_volume}|{user_mass}")
+            cache_items.append(f"{abs_path}|{mtime}|{manual_volume}|{user_mass}")
         cache_items.append(f"fluid_density={self.fluid_density}")
         cache_items.append(f"gravity={self.g}")
         cache_key_str = ";".join(str(x) for x in cache_items)
@@ -272,13 +276,18 @@ class WECModel:
         cache_file = os.path.join(cache_dir, f"{hash_key}.pkl")
 
         # Check for cached result
+        cached_result = None
+        cache_valid = False
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "rb") as f:
                     cached = pickle.load(f)
-                return cached
             except Exception:
-                pass  # If cache is corrupt, fall through to recalc
+                # If cache is corrupt, ignore and recalc
+                cached_result = None
+                cache_valid = False
+        if cache_valid:
+            return cached_result
 
         # Calculate total mass and total weight
         total_mass = 0
@@ -328,11 +337,11 @@ class WECModel:
 
         if f_min * f_max > 0:
             if f_min < 0 and f_max < 0:
-                print("The object is too heavy: fully sunk")
+                buoyant_message = "The object is too heavy: fully sunk"
                 waterline = max_z
                 submerged = None
             elif f_min > 0 and f_max > 0:
-                print("The object is too light: floats without submerging")
+                buoyant_message = "The object is too light: floats without submerging"
                 waterline = min_z
                 submerged = None
             else:
@@ -340,7 +349,7 @@ class WECModel:
                 submerged = None
         else:
             waterline = brentq(total_buoyancy, z_min, z_max, xtol=1e-5)
-            print("The object floats: it sits in the water")
+            buoyant_message = "The object floats: it sits in the water"
             # Calculate submerged meshes at equilibrium waterline
             submerged_parts = []
             for part in self.parts:
@@ -378,12 +387,13 @@ class WECModel:
         combined = trimesh.Scene(self.parts)
 
         relative_waterline = waterline - min_z
-        result_tuple = (combined, waterline, relative_waterline, submerged, self._current_cob, combined_com, total_mass)
-        # Save to cache
+        result_tuple = (combined, waterline, relative_waterline, submerged, self._current_cob, combined_com, total_mass, buoyant_message)
+        # Save to cache (overwrite any old/corrupt cache)
         try:
             with open(cache_file, "wb") as f:
                 pickle.dump(result_tuple, f)
         except Exception:
+            # Don't let cache write errors break computation
             pass
         return result_tuple
 
@@ -430,7 +440,7 @@ class WECModel:
         Visualise the WEC and waterline using equilibrium waterline calculation.
         This method only handles scene creation and showing the mesh, without printing results.
         """
-        combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
+        combined, waterline, relative_waterline, submerged, cob, com, mass, buoyant_message = self.solve_equilibrium()
         
         # Create the fluid
         # Since combined is a Scene, get bounds from parts
@@ -457,12 +467,13 @@ class WECModel:
         """
         Print equilibrium and stability results. This method does not modify meshes or scene data.
         """
-        combined, waterline, relative_waterline, submerged, cob, com, mass = self.solve_equilibrium()
+        combined, waterline, relative_waterline, submerged, cob, com, mass, buoyant_message = self.solve_equilibrium()
         GM_x, GM_y, stable_roll, stable_pitch = self.check_stability(combined, waterline, relative_waterline, submerged, cob, com, mass)
         total_volume = sum([p._manual_volume if hasattr(p, '_manual_volume') and p._manual_volume is not None else p.volume for p in self.parts])
         overall_density = mass / total_volume if total_volume > 0 else float('nan')
 
         if output_to_terminal:
+            print(buoyant_message)
             print(f"Waterline: {relative_waterline:.3g} m above bottom of object")
             print(f"Total Mass: {mass:.3g} kg")    
             print(f"Overall Density: {overall_density:.3g} kg/m^3")
@@ -474,7 +485,7 @@ class WECModel:
                 print(f"  Roll GM: {GM_x:.3g} m -> {'Stable' if stable_roll else 'Unstable'}")
                 print(f"  Pitch GM: {GM_y:.3g} m -> {'Stable' if stable_pitch else 'Unstable'}")
         else:
-            return relative_waterline, mass, overall_density, submerged.volume, cob, com, GM_x, GM_y, stable_roll, stable_pitch
+            return relative_waterline, mass, overall_density, submerged.volume, cob, com, GM_x, GM_y, stable_roll, stable_pitch, buoyant_message
     
     def clear(self):
         """

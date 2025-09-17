@@ -685,45 +685,11 @@ class MainWindow(QMainWindow):
                     manual_com=manual_com
                 )
                 self.progress_bar.setValue(i+1)
-            # Run equilibrium solver
-            (relative_waterline, 
-             total_mass, 
-             overall_density, 
-             submerged_volume, 
-             cob, com, 
-             GM_x, GM_y, 
-             stable_roll, stable_pitch
-             ) = wec.show_results(output_to_terminal=False)
-
-            # Update GUI display to show results in self.result_layout
+            # Clear previous outputs
             self.result_layout.clear()
-            # Waterline
-            self.result_layout.addRow(QLabel("Waterline:"), QLabel(f"{relative_waterline:.3g} m above bottom of object"))
-            # Total Mass
-            self.result_layout.addRow(QLabel("Total Mass:"), QLabel(f"{total_mass:.3g} kg"))
-            # Overall Density
-            # Compute total volume as in show_results (mass / density)
-            if overall_density > 0:
-                total_volume = total_mass / overall_density
-            else:
-                total_volume = 0.0
-            self.result_layout.addRow(QLabel("Overall Density:"), QLabel(f"{overall_density:.3g} kg/m^3"))
-            # Submerged Volume
-            self.result_layout.addRow(QLabel("Submerged Volume:"), QLabel(f"{submerged_volume:.3g} m^3"))
-            # Center of Buoyancy
-            self.result_layout.addRow(QLabel("Center of Buoyancy:"), QLabel(str(cob)))
-            # Center of Mass
-            self.result_layout.addRow(QLabel("Center of Mass:"), QLabel(str(com)))
-            # Stability Check
-            stability_label = QLabel("Stability Check:")
-            stability_label.setStyleSheet("font-weight: bold;")
-            self.result_layout.addRow(stability_label)
-            # Roll GM and stability
-            roll_stable_str = "Stable" if stable_roll else "Unstable"
-            self.result_layout.addRow(QLabel("  Roll GM:"), QLabel(f"{GM_x:.3g} m -> {roll_stable_str}"))
-            # Pitch GM and stability
-            pitch_stable_str = "Stable" if stable_pitch else "Unstable"
-            self.result_layout.addRow(QLabel("  Pitch GM:"), QLabel(f"{GM_y:.3g} m -> {pitch_stable_str}"))
+            # Redirect stdout to GUI and call show_results with output_to_terminal=True
+            with self.redirect_stdout_to_gui():
+                wec.show_results(output_to_terminal=True)
         except Exception as e:
             tb = traceback.format_exc()
             QMessageBox.critical(self, "Solver Error", f"{e}\n{tb}")
