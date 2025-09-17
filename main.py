@@ -88,7 +88,7 @@ class WECModel:
         """
         for part in self.parts:
             if part.is_watertight:
-                print(f"Mesh '{part.name}' is watertight")
+                print(f"'{part.name}' is watertight")
             else:
                 open_facets = part.facets_boundary
                 print(f"'{part.name}' is NOT watertight")
@@ -476,6 +476,19 @@ class WECModel:
         else:
             return relative_waterline, mass, overall_density, submerged.volume, cob, com, GM_x, GM_y, stable_roll, stable_pitch
     
+    def clear(self):
+        """
+        Reset the model's values to the initial state after __init__, except for fluid_density and gravity.
+        This clears all loaded parts and resets any cached or computed properties.
+        """
+        self.parts = []
+        # Reset cached/computed properties
+        if hasattr(self, 'total_mass'):
+            del self.total_mass
+        if hasattr(self, 'total_volume'):
+            del self.total_volume
+        if hasattr(self, '_current_cob'):
+            del self._current_cob
 
 if __name__ == "__main__":
     wec = WECModel()

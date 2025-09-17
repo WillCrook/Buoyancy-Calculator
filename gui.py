@@ -379,10 +379,17 @@ class MainWindow(QMainWindow):
         )
         if not filename:
             return
-        # Write self.parts list to JSON
+        # Save both parts and environment settings
+        config = {
+            "parts": self.parts,
+            "environment": {
+                "fluid_density": self.fluid_density_spin.value(),
+                "gravity": self.gravity_spin.value()
+            }
+        }
         try:
             with open(filename, "w") as f:
-                json.dump(self.parts, f, indent=2)
+                json.dump(config, f, indent=2)
         except Exception as e:
             QMessageBox.critical(self, "Save Config Error", str(e))
 
@@ -454,13 +461,20 @@ class MainWindow(QMainWindow):
         """Load config from the given file, update recent configs."""
         if not filename:
             return
-        # Load JSON into list of parts
+        # Load JSON and handle both legacy (list of parts) and new (dict with parts & environment)
         try:
             with open(filename, "r") as f:
-                loaded_parts = json.load(f)
+                config = json.load(f)
         except Exception as e:
             QMessageBox.critical(self, "Load Config Error", str(e))
             return
+        # Determine if config is dict (new format) or list (legacy)
+        if isinstance(config, dict):
+            loaded_parts = config.get("parts", [])
+            environment = config.get("environment", {})
+        else:
+            loaded_parts = config
+            environment = {}
         # Clear current parts, widgets, and list
         self.parts = []
         for w in self.part_widgets.values():
@@ -481,6 +495,16 @@ class MainWindow(QMainWindow):
         if self.parts:
             self.parts_list.setCurrentRow(0)
         self.update_param_widget()
+        # Set environment settings if present
+        if environment:
+            fluid_density = environment.get("fluid_density")
+            gravity = environment.get("gravity")
+            if fluid_density is not None:
+                self.fluid_density_spin.setValue(fluid_density)
+                self.wec.set_fluid_density(fluid_density)
+            if gravity is not None:
+                self.gravity_spin.setValue(gravity)
+                self.wec.set_gravity(gravity)
         # Save to recent configs
         self.save_recent_config(filename)
 
@@ -590,6 +614,12 @@ class MainWindow(QMainWindow):
                                p['params'].get('manual_com', None)))
         try:
             wec = self.wec
+            # Clear the WEC model to prevent accumulation of mass/parts
+            if hasattr(wec, "clear"):
+                wec.clear()
+            else:
+                # If WECModel does not have a clear method, it should be implemented to reset its state.
+                pass
             self.progress_bar.setMaximum(len(param_list))
             self.progress_bar.setValue(0)
             for i, (filepath, scale, mass, density, rotate, rotations, manual_volume, manual_com) in enumerate(param_list):
