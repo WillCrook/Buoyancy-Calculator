@@ -1,23 +1,25 @@
 import sys
+import os
+import traceback
+import json
+import io
+from contextlib import contextmanager
+
+# Third-party imports
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QListWidget, QListWidgetItem,
     QLineEdit, QFileDialog, QAbstractItemView, QFormLayout, QDoubleSpinBox,
-    QSpinBox, QGroupBox, QGridLayout, QMessageBox, QCheckBox
+    QSpinBox, QGroupBox, QGridLayout, QMessageBox, QCheckBox, QProgressBar
 )
 from PyQt6.QtCore import Qt, QMimeData
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
-from tqdm import tqdm
 
-import os
-import traceback
-import json
-
-# Import WECModel from main.py
+# Local imports
 from main import WECModel
 
 class PartsListWidget(QListWidget):
-    """A QListWidget that accepts drag-and-drop for STEP/STL files and calls a callback when files are dropped."""
+    """QListWidget that accepts drag-and-drop for STEP/STL files and calls a callback when files are dropped."""
     def __init__(self, file_loaded_callback):
         super().__init__()
         self.file_loaded_callback = file_loaded_callback
@@ -38,7 +40,7 @@ class PartsListWidget(QListWidget):
         event.acceptProposedAction()
 
 class DragDropWidget(QWidget):
-    """A QWidget that accepts drag-and-drop for STEP/STL files."""
+    """QWidget that accepts drag-and-drop for STEP/STL files."""
     def __init__(self, file_loaded_callback):
         super().__init__()
         self.file_loaded_callback = file_loaded_callback
@@ -328,7 +330,7 @@ class MainWindow(QMainWindow):
         self.env_group.setLayout(env_layout)
         right_layout.addWidget(self.env_group)
 
-        # Add Watertight check buttons at the top of right panel
+        # Watertight check buttons
         self.watertight_no_vis_btn = QPushButton("Check CAD Models are Watertight")
         self.watertight_no_vis_btn.clicked.connect(self.check_watertight_no_vis)
         right_layout.addWidget(self.watertight_no_vis_btn)
@@ -345,7 +347,6 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.visualize_btn)
 
         # Progress bar for solver
-        from PyQt6.QtWidgets import QProgressBar
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setValue(0)
@@ -551,8 +552,10 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _collect_supported_files(paths):
-        """Given a list of file/folder paths, collect all supported files (.stl, .step, .stp).
-        If a folder is given, add all supported files in that folder (non-recursive)."""
+        """
+        Given a list of file/folder paths, collect all supported files (.stl, .step, .stp).
+        If a folder is given, add all supported files in that folder (non-recursive).
+        """
         supported_exts = ('.stl', '.step', '.stp')
         files = []
         for path in paths:
@@ -851,26 +854,21 @@ class MainWindow(QMainWindow):
         label = QLabel(str(text))
         self.result_layout.addRow(label)
 
-    from contextlib import contextmanager
-    import io
     @contextmanager
     def redirect_stdout_to_gui(self):
         """Context manager to capture stdout and append to Solver Outputs box."""
-        import sys
-        buffer = self.io.StringIO()
+        buffer = io.StringIO()
         old_stdout = sys.stdout
         sys.stdout = buffer
         try:
             yield
         finally:
             sys.stdout = old_stdout
-            # Split into lines and append each to solver output
             buffer.seek(0)
             for line in buffer.read().splitlines():
                 if line.strip():
                     self.append_solver_output(line)
 
-# Add clear method to QFormLayout if missing
 def _formlayout_clear(self):
     while self.rowCount():
         self.removeRow(0)
